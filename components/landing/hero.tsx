@@ -13,7 +13,7 @@ function Hero() {
         Fresh immigration content every week, in your own face and voice.
       </h1>
       <p className="mt-12 max-w-[520px] text-[clamp(17px,1.5vw,20px)] leading-[1.55] text-pretty text-stone-600">
-        Be the consultant everyone sees online, without ever pressing record.
+        Be the consultant everyone sees online, without filming a new video every week.
       </p>
     </header>
   )

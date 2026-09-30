@@ -15,10 +15,11 @@ function VideoMarquee() {
       className="scroll-mt-20 overflow-hidden py-12 md:py-16 lg:py-20 motion-reduce:overflow-x-auto"
     >
       <div className="mx-auto mb-12 max-w-[1360px] px-(--page-pad) font-mono text-[12px] tracking-[0.12em] text-stone-600 uppercase">
-        Samples
+        Take a look at our samples
       </div>
       <div
-        className="flex w-max animate-marquee hover:[animation-play-state:paused] motion-reduce:animate-none"
+        // On hover the track stops and every card except the hovered one fades.
+        className="flex w-max animate-marquee hover:[animation-play-state:paused] [&:hover>*:not(:hover)]:opacity-30 motion-reduce:animate-none"
         style={{ animationDuration: `${HALF.length * SECONDS_PER_CARD}s` }}
       >
         {[...HALF, ...HALF].map((sample, i) => (

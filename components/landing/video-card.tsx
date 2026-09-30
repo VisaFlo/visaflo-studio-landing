@@ -4,7 +4,16 @@ import * as React from "react"
 
 import type { Sample } from "@/components/landing/samples"
 
-function SampleVideo({ sample, startAt }: { sample: Sample; startAt: number }) {
+function SampleVideo({
+  sample,
+  startAt,
+  sound,
+}: {
+  sample: Sample
+  startAt: number
+  /** True while the viewer hovers the card: restart and play with audio. */
+  sound: boolean
+}) {
   const ref = React.useRef<HTMLVideoElement>(null)
 
   React.useEffect(() => {
@@ -38,6 +47,23 @@ function SampleVideo({ sample, startAt }: { sample: Sample; startAt: number }) {
     return () => observer.disconnect()
   }, [startAt])
 
+  React.useEffect(() => {
+    const video = ref.current
+    if (!video) return
+    if (!sound) {
+      video.muted = true
+      return
+    }
+    video.currentTime = 0
+    video.muted = false
+    // Browsers only allow audio after the viewer has clicked or tapped the
+    // page. Until then the hover keeps playing silently.
+    video.play().catch(() => {
+      video.muted = true
+      video.play().catch(() => {})
+    })
+  }, [sound])
+
   return (
     <video
       ref={ref}
@@ -64,14 +90,21 @@ function VideoCard({
   /** Marks the repeated marquee copies so assistive tech reads each card once. */
   hidden?: boolean
 }) {
+  const [sound, setSound] = React.useState(false)
+
   return (
     <div
       aria-hidden={hidden || undefined}
-      className="mr-4 w-[clamp(230px,22vw,290px)] flex-none"
+      // The gap is padding, not margin, so moving across it keeps the card hovered.
+      className="box-content w-[clamp(230px,22vw,290px)] flex-none pr-4 transition-opacity duration-300"
+      onPointerEnter={() => setSound(true)}
+      onPointerLeave={() => setSound(false)}
+      // A click supplies the user activation browsers require for audio.
+      onClick={() => setSound(true)}
     >
       <div className="relative aspect-[9/16] overflow-hidden rounded-[6px] border border-stone-950/8 bg-[repeating-linear-gradient(135deg,#f5f5f4_0_12px,#eeedeb_12px_24px)]">
         {sample.videoSrc ? (
-          <SampleVideo sample={sample} startAt={startAt} />
+          <SampleVideo sample={sample} startAt={startAt} sound={sound} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center p-6 text-center font-mono text-[11px] text-stone-400">
             sample video · 9:16
