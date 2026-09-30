@@ -4,9 +4,12 @@ import { cn } from "@/lib/utils"
 
 function Logo({
   size = "nav",
+  inverted = false,
   className,
 }: {
   size?: "nav" | "footer"
+  /** White mark with a black V, for dark backgrounds. */
+  inverted?: boolean
   className?: string
 }) {
   // The nav shows the "Studio" badge; the footer shows the VisaFlo mark.
@@ -22,7 +25,7 @@ function Logo({
     >
       {!isNav && (
         <Image
-          src="/visaflo-logo.png"
+          src={inverted ? "/visaflo-logo-inverted.png" : "/visaflo-logo.png"}
           alt=""
           width={26}
           height={26}

@@ -22,7 +22,7 @@ function Hero() {
       <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
         <a
           href="#waitlist"
-          className="flex min-h-11 items-center justify-center rounded-full bg-stone-950 px-5 text-[14px] font-medium text-white hover:bg-stone-800"
+          className="flex min-h-11 items-center justify-center rounded-none bg-stone-950 px-5 text-[14px] font-medium text-white hover:bg-stone-800"
         >
           Get my sample video
         </a>

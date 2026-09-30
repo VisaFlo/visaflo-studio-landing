@@ -19,7 +19,16 @@ const newsreader = Newsreader({
   axes: ["opsz"],
 });
 
+// Absolute base for canonical and Open Graph URLs: the Vercel production
+// domain when building there, else an explicit NEXT_PUBLIC_SITE_URL.
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "http://localhost:3000");
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "VisaFlo Studio | Fresh immigration news, in your own face and voice.",
   description:
     "Immigration news turned into videos with your face, voice and firm's branding. No ring light. No scripts to write. Review, then post.",

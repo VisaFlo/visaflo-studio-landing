@@ -32,12 +32,12 @@ function HeroForm() {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="you@yourfirm.ca"
-          className="h-[52px] max-w-[340px] flex-[1_1_240px] rounded-full border border-stone-950/16 bg-transparent px-5 text-[15px] text-stone-950 outline-none placeholder:text-stone-500 focus-visible:border-stone-950"
+          className="h-[52px] max-w-[340px] flex-[1_1_240px] rounded-none border border-stone-950/16 bg-transparent px-5 text-[15px] text-stone-950 outline-none placeholder:text-stone-500 focus-visible:border-stone-950"
         />
         <Button
           type="submit"
           disabled={pending}
-          className="h-[52px] rounded-full border-0 bg-stone-950 px-[26px] text-[15px] text-white hover:bg-stone-800"
+          className="h-[52px] rounded-none border-0 bg-stone-950 px-[26px] text-[15px] text-white hover:bg-stone-800"
         >
           {pending ? "Sending…" : "Get my sample video"}
         </Button>

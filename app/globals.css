@@ -145,6 +145,8 @@
   html {
     @apply font-sans;
     scroll-behavior: smooth;
+    /* No rubber-band bounce past the top or bottom of the page. */
+    overscroll-behavior: none;
   }
   @media (prefers-reduced-motion: reduce) {
     html {

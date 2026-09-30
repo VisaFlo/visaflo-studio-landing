@@ -81,7 +81,7 @@ function WaitlistForm() {
       <Button
         type="submit"
         disabled={pending}
-        className="mt-2 h-14 rounded-full border-0 text-[16px] hover:bg-stone-800"
+        className="mt-2 h-14 rounded-none border-0 text-[16px] hover:bg-stone-800"
       >
         {pending ? "Sending…" : "Get my sample video"}
       </Button>
