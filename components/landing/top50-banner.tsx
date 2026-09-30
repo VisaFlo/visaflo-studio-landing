@@ -85,6 +85,8 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
         showCloseButton={false}
         // Closing must not hand focus back to the banner and outline it.
         onCloseAutoFocus={(event) => event.preventDefault()}
+        // Only the Close button (or Esc) dismisses it, not a click on the backdrop.
+        onInteractOutside={(event) => event.preventDefault()}
         className="gap-0 rounded-[8px] bg-white p-8 text-stone-950 sm:max-w-[440px]"
       >
         {sent ? (
@@ -150,11 +152,19 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
               >
                 {error}
               </div>
-              <DialogFooter className="mt-2">
+              <DialogFooter className="mt-2 flex-row gap-3">
+                <DialogClose asChild>
+                  <button
+                    type="button"
+                    className="flex h-[52px] flex-1 items-center justify-center rounded-none border border-stone-950 bg-transparent px-7 text-[16px] font-light text-stone-950 hover:bg-stone-100"
+                  >
+                    Close
+                  </button>
+                </DialogClose>
                 <button
                   type="submit"
                   disabled={pending}
-                  className="flex h-[52px] w-full items-center justify-center rounded-none bg-stone-950 px-7 text-[16px] font-light text-white hover:bg-stone-800 disabled:opacity-60"
+                  className="flex h-[52px] flex-1 items-center justify-center rounded-none bg-stone-950 px-7 text-[16px] font-light text-white hover:bg-stone-800 disabled:opacity-60"
                 >
                   {pending ? "Submitting…" : "Submit"}
                 </button>
