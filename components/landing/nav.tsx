@@ -9,7 +9,7 @@ const LINKS = [
 
 function Nav() {
   return (
-    <nav className="sticky top-0 z-20 flex items-center justify-between gap-3 sm:gap-6 border-b border-stone-950/8 bg-white/85 px-(--page-pad) py-[18px] backdrop-blur-md">
+    <nav className="sticky top-0 z-20 flex items-center justify-between gap-3 max-[360px]:gap-2 sm:gap-6 border-b border-stone-950/8 bg-white/85 px-(--page-pad) py-[18px] backdrop-blur-md">
       <a
         href="#top"
         aria-label="VisaFlo Studio, back to top"
@@ -22,7 +22,7 @@ function Nav() {
           history.replaceState(null, "", location.pathname + location.search)
         }}
       >
-        <Logo />
+        <Logo className="max-[360px]:gap-1.5 max-[360px]:text-[20px] max-[360px]:[&>span:last-child]:px-1.5 max-[360px]:[&>span:last-child]:text-[14px]" />
       </a>
       <div className="flex items-center gap-7 text-[14px] text-stone-600">
         {LINKS.map((link) => (
@@ -36,7 +36,7 @@ function Nav() {
         ))}
         <a
           href="#waitlist"
-          className="flex h-9 items-center bg-stone-950 px-4 font-light whitespace-nowrap text-white hover:bg-stone-800"
+          className="flex h-9 items-center bg-stone-950 px-4 font-light whitespace-nowrap text-white hover:bg-stone-800 max-[360px]:px-3 max-[360px]:text-[12px]"
         >
           Get my sample video
         </a>

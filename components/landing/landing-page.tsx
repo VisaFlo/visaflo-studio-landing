@@ -1,7 +1,9 @@
 import { Footer } from "@/components/landing/footer"
+import { ConversionTracking } from "@/components/landing/conversion-tracking"
 import { Hero } from "@/components/landing/hero"
 import { HowItWorks } from "@/components/landing/how-it-works"
 import { Nav } from "@/components/landing/nav"
+import { SourceToVideo } from "@/components/landing/source-to-video"
 import { Top50Banner } from "@/components/landing/top50-banner"
 import { VideoMarquee } from "@/components/landing/video-marquee"
 import { WaitlistProvider } from "@/components/landing/waitlist-provider"
@@ -13,10 +15,12 @@ function LandingPage({ chartOpen = false }: { chartOpen?: boolean }) {
   return (
     <WaitlistProvider>
       <div className="min-h-screen bg-white leading-[normal] text-stone-950">
+        <ConversionTracking />
         <Top50Banner defaultOpen={chartOpen} />
         <Nav />
         <Hero />
         <VideoMarquee />
+        <SourceToVideo />
         <HowItWorks />
         <WaitlistSection />
         <Footer />

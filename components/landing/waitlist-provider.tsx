@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { trackStudioEvent } from "@/lib/analytics"
 import {
   EMAIL_PATTERN,
   INVALID_EMAIL_MESSAGE,
@@ -71,6 +72,7 @@ function WaitlistProvider({ children }: { children: React.ReactNode }) {
       }
       setEmailValue(trimmedEmail)
       setSubmitted(true)
+      trackStudioEvent("generate_lead", { lead_type: "sample_video" })
     } catch {
       setError(SERVER_ERROR_MESSAGE)
     } finally {

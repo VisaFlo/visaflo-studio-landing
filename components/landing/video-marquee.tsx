@@ -12,7 +12,7 @@ function VideoMarquee() {
   return (
     <section
       id="samples"
-      className="scroll-mt-20 overflow-hidden pt-16 pb-10 md:pt-28 lg:pt-32 md:pb-12 motion-reduce:overflow-x-auto"
+      className="scroll-mt-20 overflow-hidden pt-12 pb-10 md:pt-16 md:pb-12 motion-reduce:overflow-x-auto"
     >
       <div className="mx-auto mb-4 max-w-[1360px] px-(--page-pad)">
         <h2 className="font-mono text-[11px] tracking-[0.1em] text-stone-600 uppercase">
