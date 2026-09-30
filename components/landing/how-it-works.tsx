@@ -8,12 +8,8 @@ const STEPS = [
     body: "Short scripts from the latest immigration news.",
   },
   {
-    title: "You approve",
-    body: "Check sources. Edit and approve.",
-  },
-  {
-    title: "You post",
-    body: "Download your captioned, branded video.",
+    title: "Review & post",
+    body: "Approve the script, then download and post your branded video.",
   },
 ]
 
