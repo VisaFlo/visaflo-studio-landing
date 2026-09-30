@@ -9,8 +9,7 @@ function HeroForm() {
   if (submitted) {
     return (
       <div role="status" className="text-right text-[16px] text-stone-950">
-        You&apos;re on the list. We&apos;ll email {email} when early access
-        opens.
+        Request received. We&apos;ll contact {email} about your sample.
       </div>
     )
   }
@@ -40,7 +39,7 @@ function HeroForm() {
           disabled={pending}
           className="h-[52px] rounded-full border-0 bg-stone-950 px-[26px] text-[15px] text-white hover:bg-stone-800"
         >
-          {pending ? "Joining…" : "Join the waitlist"}
+          {pending ? "Sending…" : "Get my sample video"}
         </Button>
       </form>
       <div

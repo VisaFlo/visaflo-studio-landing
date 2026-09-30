@@ -25,10 +25,10 @@ function WaitlistForm() {
     return (
       <div role="status" className="border-t border-stone-900 pt-7">
         <div className="font-serif text-[36px] leading-[1.1]">
-          You&apos;re on the list.
+          Request received.
         </div>
         <p className="mt-3.5 text-[16px] leading-[1.55] text-stone-600">
-          We&apos;ll email {email} when VisaFlo Studio is ready for you.
+          We&apos;ll contact {email} about your sample.
         </p>
       </div>
     )
@@ -83,7 +83,7 @@ function WaitlistForm() {
         disabled={pending}
         className="mt-2 h-14 rounded-full border-0 text-[16px] hover:bg-stone-800"
       >
-        {pending ? "Joining…" : "Join the waitlist"}
+        {pending ? "Sending…" : "Get my sample video"}
       </Button>
       <div role="alert" className="min-h-[18px] text-[13px] text-red-700">
         {error}

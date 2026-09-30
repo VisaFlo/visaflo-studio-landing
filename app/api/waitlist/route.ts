@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Failed to email waitlist entry", error);
     return Response.json(
-      { error: "We couldn't save your signup. Please try again." },
+      { error: "We couldn't save your request. Please try again." },
       { status: 500 },
     );
   }
