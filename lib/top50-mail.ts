@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { escapeHtml, sendMail, TEAM_INBOX } from "@/lib/sendgrid"
+import { CHART_DATA_DATE } from "@/lib/top50"
 import { detailsTable, vancouverTime } from "@/lib/waitlist-mail"
 
 // The ranking graphics live outside public/ so they are only handed out by
@@ -12,7 +13,6 @@ const CHARTS = [
 ]
 
 export const CHART_TITLE = "Top 50 RCICs & Immigration Lawyers on YouTube"
-const DATA_DATE = "September 28, 2026"
 
 export async function sendTop50Email(email: string, siteUrl: string): Promise<void> {
   const attachments = await Promise.all(
@@ -25,7 +25,7 @@ export async function sendTop50Email(email: string, siteUrl: string): Promise<vo
 
   const paragraphs = [
     "Here is the ranking you asked for: the 50 licensed RCICs and immigration lawyers with the biggest YouTube audiences. Two charts are attached, one ranked by subscribers and one ranked by views on videos posted in the last 12 months.",
-    `Public YouTube counts were measured on ${DATA_DATE}. Every channel is run by a licensee or their firm, checked against the CICC register and law society directories, and posted a video in the last 12 months.`,
+    `Public YouTube counts were measured on ${CHART_DATA_DATE}. Every channel is run by a licensee or their firm, checked against the CICC register and law society directories, and posted a video in the last 12 months.`,
     "A bigger audience does not mean better advice. But explaining immigration clearly, week after week, to this many people takes real work.",
     `VisaFlo Studio makes this kind of video for you, in your own face and voice, from IRCC's own announcements. Early access: ${siteUrl}`,
   ]
