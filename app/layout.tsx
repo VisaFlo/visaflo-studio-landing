@@ -22,7 +22,7 @@ const newsreader = Newsreader({
 export const metadata: Metadata = {
   title: "VisaFlo Studio | Fresh immigration content every week, in your own face and voice",
   description:
-    "No topic hunting, no scripts, no ring light. VisaFlo turns the latest IRCC updates into videos of you, ready for YouTube, Instagram and LinkedIn.",
+    "Be the consultant everyone sees online, without ever pressing record.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
