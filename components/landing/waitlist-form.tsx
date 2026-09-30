@@ -55,7 +55,7 @@ function WaitlistForm() {
         />
       </label>
       <label className={LABEL_CLASS}>
-        Full name
+        Your name
         <input
           name="name"
           autoComplete="name"
@@ -66,7 +66,7 @@ function WaitlistForm() {
         />
       </label>
       <label className={LABEL_CLASS}>
-        Work email
+        Email
         <input
           type="email"
           name="email"

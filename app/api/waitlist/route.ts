@@ -1,5 +1,5 @@
 import { parseWaitlistEntry } from "@/lib/waitlist";
-import { saveWaitlistEntry } from "@/lib/waitlist-store";
+import { sendWaitlistEmail } from "@/lib/waitlist-mail";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -15,11 +15,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    // A repeat signup is reported as success too, so the response never reveals
-    // whether an email is already on the list.
-    await saveWaitlistEntry(parsed.entry);
+    await sendWaitlistEmail(parsed.entry);
   } catch (error) {
-    console.error("Failed to save waitlist entry", error);
+    console.error("Failed to email waitlist entry", error);
     return Response.json(
       { error: "We couldn't save your signup. Please try again." },
       { status: 500 },
