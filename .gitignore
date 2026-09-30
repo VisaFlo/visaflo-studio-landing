@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# waitlist signups written by lib/waitlist-store.ts
+/.data/
+.gstack/
