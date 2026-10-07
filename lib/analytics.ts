@@ -9,8 +9,10 @@ type StudioEvents = {
   generate_lead:
     | { lead_type: "sample_video"; form_location: WaitlistSource }
     | { lead_type: "top50_chart" }
+    | { lead_type: "video_playbook" }
   // auto: opened by landing on /chart rather than by a click.
   top50_dialog_open: { auto: boolean }
+  playbook_dialog_open: { auto: boolean }
 }
 
 type AnalyticsWindow = Window & { dataLayer?: IArguments[] }
