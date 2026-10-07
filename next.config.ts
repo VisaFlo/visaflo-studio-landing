@@ -25,6 +25,11 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
+        source: "/guide",
+        destination: `/playbook?${instantly}&utm_campaign=studio-followup&utm_content=playbook`,
+        permanent: false,
+      },
+      {
         source: "/examples",
         destination: `/?${instantly}&utm_campaign=studio-followup&utm_content=examples#samples`,
         permanent: false,
