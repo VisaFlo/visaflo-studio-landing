@@ -3,6 +3,8 @@
 import * as React from "react"
 
 import { trackStudioEvent } from "@/lib/analytics"
+import { getAttribution } from "@/lib/attribution"
+import { identify } from "@/lib/mixpanel"
 import {
   EMAIL_PATTERN,
   INVALID_EMAIL_MESSAGE,
@@ -60,6 +62,7 @@ function WaitlistProvider({ children }: { children: React.ReactNode }) {
           name: name.trim() || undefined,
           firm: firm.trim() || undefined,
           source,
+          attribution: getAttribution(),
         }),
       })
       if (response.status === 400) {
@@ -72,7 +75,8 @@ function WaitlistProvider({ children }: { children: React.ReactNode }) {
       }
       setEmailValue(trimmedEmail)
       setSubmitted(true)
-      trackStudioEvent("generate_lead", { lead_type: "sample_video" })
+      identify(trimmedEmail, { name: name.trim() || undefined, firm: firm.trim() || undefined })
+      trackStudioEvent("generate_lead", { lead_type: "sample_video", form_location: source })
     } catch {
       setError(SERVER_ERROR_MESSAGE)
     } finally {

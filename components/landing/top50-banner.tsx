@@ -12,6 +12,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { trackStudioEvent } from "@/lib/analytics";
+import { getAttribution } from "@/lib/attribution";
+import { identify } from "@/lib/mixpanel";
 import { CHART_DATA_DATE } from "@/lib/top50";
 import { cn } from "@/lib/utils";
 import { EMAIL_PATTERN, INVALID_EMAIL_MESSAGE } from "@/lib/waitlist";
@@ -95,6 +98,11 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const [sent, setSent] = React.useState(false);
   const [error, setError] = React.useState("");
 
+  // "/chart" opens the dialog without a click, so count that open here.
+  React.useEffect(() => {
+    if (defaultOpen) trackStudioEvent("top50_dialog_open", { auto: true });
+  }, [defaultOpen]);
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
@@ -109,7 +117,7 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
       const response = await fetch("/api/top50", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
+        body: JSON.stringify({ email: trimmed, attribution: getAttribution() }),
       });
       if (response.status === 400) {
         setError(INVALID_EMAIL_MESSAGE);
@@ -121,6 +129,8 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
       }
       setEmail(trimmed);
       setSent(true);
+      identify(trimmed);
+      trackStudioEvent("generate_lead", { lead_type: "top50_chart" });
     } catch {
       setError(SERVER_ERROR_MESSAGE);
     } finally {
@@ -142,6 +152,7 @@ function Top50Banner({ defaultOpen = false }: { defaultOpen?: boolean }) {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
+        if (next) trackStudioEvent("top50_dialog_open", { auto: false });
         if (!next) setError("");
       }}
     >

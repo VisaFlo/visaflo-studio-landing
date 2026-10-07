@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
+import type { Attribution } from "@/lib/attribution"
 import { escapeHtml, sendMail, TEAM_INBOX } from "@/lib/sendgrid"
 import { CHART_DATA_DATE } from "@/lib/top50"
-import { detailsTable, vancouverTime } from "@/lib/waitlist-mail"
+import { attributionRows, detailsTable, vancouverTime } from "@/lib/waitlist-mail"
 
 // The ranking graphics live outside public/ so they are only handed out by
 // email. next.config.ts traces assets/ into the /api/top50 function bundle.
@@ -14,7 +15,7 @@ const CHARTS = [
 
 export const CHART_TITLE = "Top 50 RCICs & Immigration Lawyers on YouTube"
 
-export async function sendTop50Email(email: string, siteUrl: string): Promise<void> {
+export async function sendTop50Email(email: string, siteUrl: string, attribution?: Attribution): Promise<void> {
   const attachments = await Promise.all(
     CHARTS.map(async ({ file, filename }) => ({
       filename,
@@ -49,6 +50,7 @@ export async function sendTop50Email(email: string, siteUrl: string): Promise<vo
   const notice = detailsTable([
     ["Email", email],
     ["Requested", CHART_TITLE],
+    ...attributionRows(attribution),
     ["Time", vancouverTime(new Date())],
   ])
   await sendMail({

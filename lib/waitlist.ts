@@ -1,3 +1,5 @@
+import { parseAttribution, type Attribution } from "@/lib/attribution"
+
 export const EMAIL_PATTERN = /^\S+@\S+\.\S+$/
 
 export const WAITLIST_SOURCES = ["hero", "waitlist"] as const
@@ -10,6 +12,7 @@ export type WaitlistEntry = {
   name?: string
   firm?: string
   source: WaitlistSource
+  attribution?: Attribution
 }
 
 type ParseResult =
@@ -50,6 +53,7 @@ export function parseWaitlistEntry(body: unknown): ParseResult {
       name: optionalText(input.name),
       firm: optionalText(input.firm),
       source,
+      attribution: parseAttribution(input.attribution),
     },
   }
 }
