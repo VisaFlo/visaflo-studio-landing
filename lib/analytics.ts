@@ -1,9 +1,16 @@
+import { track as trackMixpanel } from "@/lib/mixpanel"
+import type { WaitlistSource } from "@/lib/waitlist"
+
 type CtaLocation = "nav" | "hero" | "page"
 
 type StudioEvents = {
   studio_cta_click: { cta_location: CtaLocation }
   studio_samples_click: { cta_location: CtaLocation }
-  generate_lead: { lead_type: "sample_video" }
+  generate_lead:
+    | { lead_type: "sample_video"; form_location: WaitlistSource }
+    | { lead_type: "top50_chart" }
+  // auto: opened by landing on /chart rather than by a click.
+  top50_dialog_open: { auto: boolean }
 }
 
 type AnalyticsWindow = Window & { dataLayer?: IArguments[] }
@@ -32,6 +39,8 @@ function trackStudioEvent<Event extends keyof StudioEvents>(
   } catch {
     // A blocked analytics script must never interrupt a sample request.
   }
+  // Same event, same payload in Mixpanel, so both tools count the same things.
+  trackMixpanel(eventName, parameters)
 }
 
 export { trackStudioEvent }

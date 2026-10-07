@@ -1,3 +1,4 @@
+import type { Attribution, Touch } from "@/lib/attribution"
 import { escapeHtml, sendMail, TEAM_INBOX } from "@/lib/sendgrid"
 import type { WaitlistEntry } from "@/lib/waitlist"
 
@@ -22,12 +23,39 @@ export function detailsTable(rows: [string, string][]) {
   return { text, html }
 }
 
+function describeTouch(touch: Touch): string {
+  const channel = [touch.utm_source, touch.utm_medium].filter(Boolean).join(" / ")
+  const parts = [
+    channel || (touch.referrer ? `referral: ${touch.referrer}` : "direct / unknown"),
+    touch.utm_campaign && `campaign: ${touch.utm_campaign}`,
+    touch.utm_content && `content: ${touch.utm_content}`,
+    touch.landing && touch.landing !== "/" && `page: ${touch.landing}`,
+  ]
+  return parts.filter(Boolean).join(", ")
+}
+
+// Which channel brought this lead in: the latest tagged visit if there was
+// one, else the first visit. The first visit is listed too when it differs.
+export function attributionRows(attribution?: Attribution): [string, string][] {
+  const { first, last } = attribution ?? {}
+  const latest = last ?? first
+  if (!latest) return [["Came from", "unknown (no tracking data)"]]
+  const rows: [string, string][] = [["Came from", describeTouch(latest)]]
+  const cid = latest.cid ?? first?.cid
+  if (cid) rows.push(["Customer ID (cid)", cid])
+  if (first && last && first.at !== last.at) {
+    rows.push(["First visit", `${describeTouch(first)}${first.at ? ` (${vancouverTime(new Date(first.at))})` : ""}`])
+  }
+  return rows
+}
+
 export async function sendWaitlistEmail(entry: WaitlistEntry): Promise<void> {
   const { text, html } = detailsTable([
     ["Firm name", entry.firm ?? "—"],
     ["Your name", entry.name ?? "—"],
     ["Email", entry.email],
     ["Submitted from", SOURCE_LABEL[entry.source]],
+    ...attributionRows(entry.attribution),
     ["Time", vancouverTime(new Date())],
   ])
   await sendMail({
