@@ -58,6 +58,10 @@ NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
 node docs/studio-capture/rules-test.mjs
 ```
 
+To walk the flow with a real VisaFlo account without writing to production,
+set only `NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1`: sign-in and
+the name lookup use production, uploads go to the local Storage emulator.
+
 With `NEXT_PUBLIC_FIREBASE_EMULATOR_HOST` set (ignored in production builds)
 the app uses a `demo-studio` project id, so a missed emulator hookup fails
 instead of reaching production. Without `SENDGRID_API_KEY`, the team email is

@@ -12,11 +12,14 @@ export function FaceRing({
   done,
   dim,
   onVideo,
+  children,
 }: {
   stream: MediaStream | null
   done?: Set<number>
   dim?: boolean
   onVideo?: (video: HTMLVideoElement | null) => void
+  /** Overlays drawn on top of the ring (countdown, guide dot, badges). */
+  children?: React.ReactNode
 }) {
   const ticks = Array.from({ length: RING_TICKS }, (_, i) => i)
   return (
@@ -45,6 +48,7 @@ export function FaceRing({
           className={cn("size-full object-cover transition-[filter]", dim && "brightness-[0.62]")}
         />
       </div>
+      {children}
     </div>
   )
 }

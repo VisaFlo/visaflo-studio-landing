@@ -25,6 +25,12 @@ const FIRESTORE_DATABASE_ID = "ca-dryrun"
 // docs/studio-capture/README.md). A demo- project id means a missed emulator
 // hookup fails instead of touching production.
 const EMULATOR_HOST = process.env.NODE_ENV !== "production" ? process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST : undefined
+// Local QA with a real VisaFlo account: production sign-in, but uploads go to
+// the local Storage emulator so nothing lands in the production bucket.
+const STORAGE_EMULATOR_HOST =
+  process.env.NODE_ENV !== "production"
+    ? (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST ?? EMULATOR_HOST)
+    : undefined
 
 let app: FirebaseApp | undefined
 let auth: Auth | undefined
@@ -57,7 +63,7 @@ export function studioDb(): Firestore {
 export function studioStorage(): FirebaseStorage {
   if (!storage) {
     storage = getStorage(firebaseApp())
-    if (EMULATOR_HOST) connectStorageEmulator(storage, EMULATOR_HOST, 9199)
+    if (STORAGE_EMULATOR_HOST) connectStorageEmulator(storage, STORAGE_EMULATOR_HOST, 9199)
   }
   return storage
 }

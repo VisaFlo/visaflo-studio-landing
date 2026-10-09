@@ -31,6 +31,7 @@ import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording } from "@/lib/studio/recorder"
+import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
 import {
   lastSent,
   newSubmissionId,
@@ -84,6 +85,7 @@ export function CaptureFlow() {
   const [consent, setConsent] = useState(false)
   const [consentAt, setConsentAt] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null)
 
   const submissionId = useRef<string | null>(null)
   const upload = useRef<UploadHandle | null>(null)
@@ -102,14 +104,34 @@ export function CaptureFlow() {
     }
     if (!user) return
     let cancelled = false
-    void loadProfile(user.uid).then((loaded) => {
+    void Promise.all([loadProfile(user.uid), loadTake(user.uid)]).then(([loaded, saved]) => {
       if (cancelled) return
       const next = { name: loaded.name ?? "", firm: loaded.firm ?? "" }
       setProfile(next)
       const previous = lastSent(user.uid)
       setSent(previous)
-      setStep(previous ? "done" : next.name && next.firm ? "setup" : "about")
       identify((user.email ?? "").toLowerCase(), next)
+      // A take left from a reload or a closed tab: pick up at review rather
+      // than making them record again.
+      if (!previous && saved && next.name && next.firm) {
+        const { take, blob, chunks } = saved
+        setRecording({
+          blob,
+          url: URL.createObjectURL(blob),
+          mime: take.mime,
+          seconds: take.finished?.seconds ?? chunks,
+          source: take.source,
+          checks: take.finished?.checks,
+        })
+        setReviewNotice(
+          take.finished
+            ? "We kept your last recording. Watch it, then submit it or record again."
+            : "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.",
+        )
+        setStep("review")
+        return
+      }
+      setStep(previous ? "done" : next.name && next.firm ? "setup" : "about")
     })
     return () => {
       cancelled = true
@@ -172,11 +194,25 @@ export function CaptureFlow() {
     }
   }
 
+  // Every take is saved chunk by chunk as it records (see take-store).
+  function recordTake(media: MediaStream): ActiveRecorder | null {
+    if (!user) return null
+    const takeId = crypto.randomUUID()
+    void beginTake({
+      uid: user.uid,
+      takeId,
+      mime: pickRecordingMime() ?? "video/webm",
+      source: "camera",
+      startedAt: Date.now(),
+    })
+    return startRecording(media, (chunk, index) => void saveChunk(takeId, index, chunk))
+  }
+
   function beginTurn(pose: Pose) {
     if (!stream) return
     setBaseline(pose)
     recorder.current?.cancel()
-    recorder.current = startRecording(stream)
+    recorder.current = recordTake(stream)
     setStep("turn")
   }
 
@@ -194,6 +230,8 @@ export function CaptureFlow() {
     // Restart was pressed while this clip was finishing: keep the new take.
     if (recorder.current) return
     stopCamera()
+    const checks = { ...turnResult.current, voiceHeard: result.voiceHeard }
+    if (user) void finishTake(user.uid, { seconds: result.seconds, checks })
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
       return {
@@ -202,12 +240,13 @@ export function CaptureFlow() {
         mime: result.mime,
         seconds: result.seconds,
         source: "camera",
-        checks: { ...turnResult.current, voiceHeard: result.voiceHeard },
+        checks,
       }
     })
     setReviewError(null)
+    setReviewNotice(null)
     setStep("review")
-  }, [stopCamera])
+  }, [stopCamera, user])
 
   function pickFile() {
     filePicker.current?.click()
@@ -240,7 +279,14 @@ export function CaptureFlow() {
       if (previous) URL.revokeObjectURL(previous.url)
       return { blob: file, url, mime: file.type, seconds: 0, source: "upload" }
     })
+    if (user) {
+      const takeId = crypto.randomUUID()
+      void beginTake({ uid: user.uid, takeId, mime: file.type, source: "upload", startedAt: Date.now() })
+        .then(() => saveChunk(takeId, 0, file))
+        .then(() => finishTake(user.uid, { seconds: 0 }))
+    }
     setReviewError(null)
+    setReviewNotice(null)
     setStep("review")
   }
 
@@ -316,6 +362,7 @@ export function CaptureFlow() {
       await submitSampleRequest(user, request)
       const record = { topicTitle: request.topicTitle, at: new Date().toISOString() }
       rememberSent(user.uid, record)
+      void clearTake(user.uid)
       setSent(record)
       track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
       setStep("done")
@@ -329,6 +376,7 @@ export function CaptureFlow() {
 
   function startAnother() {
     upload.current?.cancel()
+    if (user) void clearTake(user.uid)
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
       return null
@@ -456,10 +504,12 @@ export function CaptureFlow() {
           <ScriptStep
             stream={stream}
             lines={lines}
+            speaking={() => recorder.current?.speaking() ?? null}
+            level={() => recorder.current?.level() ?? 0}
             onStop={() => void finishRecording()}
             onRestart={() => {
               recorder.current?.cancel()
-              recorder.current = startRecording(stream)
+              recorder.current = recordTake(stream)
               setStep("turn")
             }}
           />
@@ -477,6 +527,7 @@ export function CaptureFlow() {
             consent={consent}
             onConsent={setConsent}
             error={reviewError}
+            notice={reviewNotice}
             onSubmit={submitRecording}
             onRedo={() => (recording.source === "camera" ? setStep("camera") : pickFile())}
           />
@@ -575,6 +626,10 @@ function SetupStep({ firm, onStart, onEditProfile }: { firm: string; onStart: ()
             </button>
           )}
           <Display>Your sample video</Display>
+          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
+            First we record you: fit your face in a circle, slowly turn your head, then read a short script out
+            loud. It takes about 3 minutes.
+          </p>
         </div>
         <ol className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
           {rows.map((row, i) => (

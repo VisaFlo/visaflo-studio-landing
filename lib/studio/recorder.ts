@@ -35,11 +35,22 @@ export type Recording = {
 export type ActiveRecorder = {
   stop: () => Promise<{ blob: Blob; mime: string; seconds: number; voiceHeard: boolean }>
   cancel: () => void
+  /** Mic loudness right now, 0 to about 1. */
+  level: () => number
+  /** Whether the person is talking right now (null when the mic can't be read). */
+  speaking: () => boolean | null
 }
 
+const VOICE_RMS = 0.02
+
 // Records the camera stream and listens for a voice at the same time, so the
-// review screen can say whether the mic actually picked anything up.
-export function startRecording(stream: MediaStream): ActiveRecorder {
+// review screen can say whether the mic picked anything up and the script can
+// follow the person's reading. Each one-second chunk is handed to `onChunk`
+// so a closed tab doesn't lose the take.
+export function startRecording(
+  stream: MediaStream,
+  onChunk?: (chunk: Blob, index: number, mime: string) => void,
+): ActiveRecorder {
   const mime = pickRecordingMime()
   const recorder = new MediaRecorder(stream, {
     ...(mime ? { mimeType: mime } : {}),
@@ -48,12 +59,16 @@ export function startRecording(stream: MediaStream): ActiveRecorder {
   })
   const chunks: Blob[] = []
   recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) chunks.push(event.data)
+    if (event.data.size === 0) return
+    chunks.push(event.data)
+    onChunk?.(event.data, chunks.length - 1, recorder.mimeType || mime || "video/webm")
   }
   const startedAt = performance.now()
   recorder.start(1000)
 
   let voiceMs = 0
+  let rms = 0
+  let micReadable = false
   let audio: AudioContext | null = null
   let timer: number | undefined
   try {
@@ -67,7 +82,9 @@ export function startRecording(stream: MediaStream): ActiveRecorder {
       analyser.getFloatTimeDomainData(samples)
       let sum = 0
       for (const s of samples) sum += s * s
-      if (Math.sqrt(sum / samples.length) > 0.02) voiceMs += 100
+      rms = Math.sqrt(sum / samples.length)
+      micReadable = true
+      if (rms > VOICE_RMS) voiceMs += 100
     }, 100)
   } catch {
     voiceMs = Infinity
@@ -99,5 +116,7 @@ export function startRecording(stream: MediaStream): ActiveRecorder {
       recorder.ondataavailable = null
       if (recorder.state !== "inactive") recorder.stop()
     },
+    level: () => Math.min(1, rms * 8),
+    speaking: () => (micReadable ? rms > VOICE_RMS : null),
   }
 }
