@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return Response.json({ error: INVALID_EMAIL_MESSAGE }, { status: 400 })
   }
   try {
-    await sendPlaybookEmail(email, parseAttribution(input?.attribution))
+    await sendPlaybookEmail(email, new URL(request.url).origin, parseAttribution(input?.attribution))
   } catch (error) {
     console.error("Failed to email the Video Playbook", error)
     return Response.json({ error: "We couldn't send the playbook. Please try again." }, { status: 500 })

@@ -28,7 +28,7 @@ function WaitlistForm() {
           Request received.
         </div>
         <p className="mt-3.5 text-[16px] leading-[1.55] text-stone-600">
-          We&apos;ll contact {email} about your sample.
+          We sent {email} a link to record your face and voice. Check your inbox or spam folder.
         </p>
       </div>
     )

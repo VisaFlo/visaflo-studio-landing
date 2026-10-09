@@ -1,19 +1,13 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
-import { ATTRIBUTION_PARAMS, type Attribution } from "@/lib/attribution"
+import type { Attribution } from "@/lib/attribution"
 import { PLAYBOOK_EDITION, PLAYBOOK_FILES, PLAYBOOK_TITLE } from "@/lib/playbook"
 import { escapeHtml, sendMail, TEAM_INBOX } from "@/lib/sendgrid"
-import { attributionRows, detailsTable, vancouverTime } from "@/lib/waitlist-mail"
+import { attributionRows, detailsTable, recordLink, recordPitch, vancouverTime } from "@/lib/waitlist-mail"
 
-export async function sendPlaybookEmail(email: string, attribution?: Attribution): Promise<void> {
-  const sampleUrl = new URL("https://studio.visaflo.ca/")
-  const touch = attribution?.last ?? attribution?.first
-  for (const key of ATTRIBUTION_PARAMS) {
-    if (touch?.[key]) sampleUrl.searchParams.set(key, touch[key])
-  }
-  sampleUrl.hash = "waitlist"
-  const sampleLink = sampleUrl.toString()
+export async function sendPlaybookEmail(email: string, origin: string, attribution?: Attribution): Promise<void> {
+  const pitch = recordPitch(recordLink(origin, attribution))
   const attachments = await Promise.all(PLAYBOOK_FILES.map(async ({ file, filename, type }) => ({
     filename,
     type,
@@ -27,12 +21,12 @@ export async function sendPlaybookEmail(email: string, attribution?: Attribution
   await sendMail({
     to: email,
     subject: `Your VisaFlo Studio Video Playbook | ${PLAYBOOK_EDITION}`,
-    text: `${PLAYBOOK_TITLE}\n${PLAYBOOK_EDITION}\n\n${paragraphs.join("\n\n")}\n\nWant a video in your own face and voice? Get your Studio sample: ${sampleLink}\n\n— VisaFlo Studio`,
+    text: `${PLAYBOOK_TITLE}\n${PLAYBOOK_EDITION}\n\n${paragraphs.join("\n\n")}\n\n${pitch.text}\n\n— VisaFlo Studio`,
     html: `<div style="font:16px/1.55 -apple-system,Segoe UI,sans-serif;color:#0c0a09;max-width:560px">
       <h1 style="font:600 26px/1.2 Georgia,serif;margin:0 0 8px">${escapeHtml(PLAYBOOK_TITLE)}</h1>
       <p style="margin:0 0 24px;color:#57534e">${PLAYBOOK_EDITION}</p>
       ${paragraphs.map((p) => `<p style="margin:0 0 16px">${escapeHtml(p)}</p>`).join("")}
-      <p style="margin:24px 0 16px">Want a video in your own face and voice? <a href="${escapeHtml(sampleLink)}" style="color:#0c0a09">Get your Studio sample</a>.</p>
+      ${pitch.html}
       <p style="color:#57534e">— VisaFlo Studio</p>
     </div>`,
     attachments,
