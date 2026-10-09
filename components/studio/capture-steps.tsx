@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Camera, CameraOff, Mic, Play, Square, Sun, TriangleAlert } from "lucide-react"
 
 import { CameraVideo, FaceRing } from "@/components/studio/face-ring"
@@ -8,7 +8,9 @@ import { DoneMark, FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/co
 import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
 import { checkAlignment, RING_TICKS, ticksForPose, type AlignCheck } from "@/lib/studio/face-tracker"
 import type { Recording } from "@/lib/studio/recorder"
+import { startRecognizer, speechRecognitionSupported } from "@/lib/studio/speech-recognizer"
 import { useFaceFrames } from "@/lib/studio/use-face-frames"
+import { advancePointer, indexScript, lineOfWord, tokenize } from "@/lib/studio/word-follow"
 import { cn } from "@/lib/utils"
 
 export type Pose = { yaw: number; pitch: number }
@@ -497,6 +499,8 @@ function MicLevel({ level }: { level: number }) {
 
 const MS_PER_WORD = 330
 
+type FollowMode = "words" | "voice" | "pace"
+
 export function ScriptStep({
   stream,
   lines,
@@ -513,12 +517,16 @@ export function ScriptStep({
   onStop: () => void
   onRestart: () => void
 }) {
+  const script = useMemo(() => indexScript(lines), [lines])
   const [elapsed, setElapsed] = useState(0)
-  const [line, setLine] = useState(0)
+  // Index of the next script word to read, across all lines.
+  const [pointer, setPointer] = useState(0)
   const [mic, setMic] = useState(0)
   const [heard, setHeard] = useState(false)
-  const [deaf, setDeaf] = useState(false)
-  const lineRef = useRef(0)
+  const [mode, setMode] = useState<FollowMode>(() => (speechRecognitionSupported() ? "words" : "voice"))
+  const pointerRef = useRef(0)
+  const committedRef = useRef(0)
+  const modeRef = useRef(mode)
   const stopped = useRef(false)
   // Kept in refs so a parent re-render (new function identities) doesn't
   // restart the prompter clock.
@@ -529,62 +537,101 @@ export function ScriptStep({
     stopRef.current = onStop
     speakingRef.current = speaking
     levelRef.current = level
+    modeRef.current = mode
   })
 
-  const go = (next: number) => {
-    lineRef.current = Math.max(0, Math.min(lines.length - 1, next))
-    setLine(lineRef.current)
+  const line = lineOfWord(script, pointer)
+  const lineEnd = (i: number) => script.lineStarts[i + 1] ?? script.words.length
+
+  const moveTo = (next: number, commit: boolean) => {
+    const clamped = Math.max(0, Math.min(script.words.length, next))
+    if (commit) committedRef.current = clamped
+    pointerRef.current = clamped
+    setPointer(clamped)
   }
-  const goRef = useRef(go)
+  const goLine = (i: number) => moveTo(script.lineStarts[Math.max(0, Math.min(lines.length - 1, i))], true)
+  const goLineRef = useRef(goLine)
   useEffect(() => {
-    goRef.current = go
+    goLineRef.current = goLine
   })
 
-  // The prompter follows the voice: a line moves on once the person has
-  // spoken about as long as it takes to say it and then pauses (or keeps
-  // going well past it). Audio never leaves the browser. If the mic can't be
-  // read, it falls back to a steady reading pace.
+  // Word by word: each finished phrase moves the committed position; the
+  // phrase still being spoken moves the highlight ahead of it.
+  useEffect(() => {
+    if (mode !== "words") return
+    const handle = startRecognizer({
+      onFinal: (text) => {
+        const next = advancePointer(script.words, committedRef.current, tokenize(text))
+        committedRef.current = Math.max(committedRef.current, next)
+        if (committedRef.current > pointerRef.current) moveTo(committedRef.current, false)
+        setHeard(true)
+      },
+      onInterim: (text) => {
+        if (!text) return
+        const next = advancePointer(script.words, committedRef.current, tokenize(text))
+        if (next > pointerRef.current) moveTo(next, false)
+        setHeard(true)
+      },
+      onFail: () => setMode("voice"),
+    })
+    if (!handle) {
+      const id = window.setTimeout(() => setMode("voice"), 0)
+      return () => window.clearTimeout(id)
+    }
+    return () => handle.stop()
+    // moveTo only touches refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, script])
+
+  // Clock, mic meter and line pacing. In "words" mode this only steps in when
+  // recognition lags: the last word of a line missed, or a long stretch of
+  // speech with no matches. In "voice" mode a line moves on once the person
+  // has spoken about as long as it takes to say it and then pauses. If no
+  // voice is heard at all, it keeps a steady reading pace.
   useEffect(() => {
     const startedAt = performance.now()
     let spokenMs = 0
     let silentMs = 0
     let lineMs = 0
-    let lastLine = 0
+    let lastLine = -1
     let everHeard = false
     const id = window.setInterval(() => {
       const seconds = (performance.now() - startedAt) / 1000
       setElapsed(seconds)
       setMic(levelRef.current())
-      if (lineRef.current !== lastLine) {
-        lastLine = lineRef.current
+      const current = lineOfWord(script, pointerRef.current)
+      if (current !== lastLine) {
+        lastLine = current
         spokenMs = silentMs = lineMs = 0
       }
-      const current = lineRef.current
+      lineMs += 100
+      const talking = speakingRef.current()
+      if (talking) {
+        spokenMs += 100
+        silentMs = 0
+        everHeard = true
+        if (modeRef.current !== "words") setHeard(true)
+      } else {
+        silentMs += 100
+      }
+      if (talking !== null && !everHeard && seconds > 8 && modeRef.current === "voice") setMode("pace")
+
       if (current < lines.length - 1) {
-        let talking = speakingRef.current()
-        lineMs += 100
-        // Nothing heard in 8 seconds: likely a quiet or muted mic. Keep the
-        // prompter moving at a steady pace instead of waiting forever.
-        if (talking !== null && !everHeard && seconds > 8) {
-          setDeaf(true)
-          talking = null
-        }
-        if (talking === null) {
-          if (lineMs / 1000 > lineSeconds(lines[current])) goRef.current(current + 1)
+        const end = script.lineStarts[current + 1]
+        const words = end - script.lineStarts[current]
+        const expected = words * MS_PER_WORD
+        const m = modeRef.current
+        let next = false
+        if (m === "words") {
+          next =
+            (pointerRef.current >= end - 1 && silentMs >= 600) ||
+            (spokenMs >= expected * 1.8 && silentMs >= 500)
+        } else if (m === "voice" && talking !== null) {
+          next = (spokenMs >= expected * 0.6 && silentMs >= 350) || spokenMs >= expected * 1.5
         } else {
-          if (talking) {
-            spokenMs += 100
-            silentMs = 0
-            everHeard = true
-            setHeard(true)
-          } else {
-            silentMs += 100
-          }
-          const expected = lines[current].split(/\s+/).length * MS_PER_WORD
-          if ((spokenMs >= expected * 0.6 && silentMs >= 350) || spokenMs >= expected * 1.5) {
-            goRef.current(current + 1)
-          }
+          next = lineMs / 1000 > lineSeconds(lines[current])
         }
+        if (next) goLineRef.current(current + 1)
       }
       if (seconds >= MAX_SECONDS && !stopped.current) {
         stopped.current = true
@@ -592,22 +639,23 @@ export function ScriptStep({
       }
     }, 100)
     return () => window.clearInterval(id)
-  }, [lines])
+  }, [lines, script])
 
   // Keyboard backup for when the prompter gets ahead or behind.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const current = lineOfWord(script, pointerRef.current)
       if (event.key === " " || event.key === "ArrowDown" || event.key === "ArrowRight") {
         event.preventDefault()
-        goRef.current(lineRef.current + 1)
+        goLineRef.current(current + 1)
       } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
         event.preventDefault()
-        goRef.current(lineRef.current - 1)
+        goLineRef.current(current - 1)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [script])
 
   const finish = () => {
     if (stopped.current) return
@@ -617,6 +665,44 @@ export function ScriptStep({
 
   const atEnd = line === lines.length - 1
   const visible = [line - 1, line, line + 1, line + 2].filter((i) => i >= 0 && i < lines.length)
+  const lineDone = atEnd && pointer >= lineEnd(line) - 1
+
+  // The current line, word by word: read words dark, the next word
+  // underlined, the rest light.
+  const renderCurrent = (i: number) => {
+    let wordIndex = script.lineStarts[i]
+    return lines[i].split(/\s+/).map((word, n) => {
+      const counts = tokenize(word).length > 0
+      const index = counts ? wordIndex++ : -1
+      const read = mode === "words" ? index >= 0 && index < pointer : true
+      const isNext = mode === "words" && index === pointer
+      return (
+        <span key={n}>
+          {n > 0 && " "}
+          <span
+            className={cn(
+              "transition-colors duration-150",
+              read ? "text-stone-950" : "text-stone-400",
+              isNext && "text-stone-950 underline decoration-[#4d5a48] decoration-[3px] underline-offset-[8px]",
+            )}
+          >
+            {word}
+          </span>
+        </span>
+      )
+    })
+  }
+
+  const hint =
+    mode === "pace" && !heard
+      ? "We can't hear you. Check your mic is on and not muted. The script moves at a steady pace for now."
+      : mode === "words"
+        ? heard
+          ? "Read out loud. Words light up as you say them."
+          : "Start reading out loud. Words light up as you say them."
+        : heard
+          ? "Read out loud. The script follows your voice."
+          : "Start reading out loud. The script follows your voice."
 
   return (
     <main className="mx-auto flex w-full max-w-[960px] flex-grow flex-col gap-6 px-(--page-pad) py-6 sm:gap-8 sm:py-10">
@@ -626,13 +712,7 @@ export function ScriptStep({
           <span className="flex items-center gap-2">
             <Mic className="size-4" strokeWidth={1.8} aria-hidden />
             <MicLevel level={mic} />
-            <span className={cn(deaf && !heard && "text-[#c2410c]")}>
-              {deaf && !heard
-                ? "We can't hear you. Check your mic is on and not muted. The script moves at a steady pace for now."
-                : heard
-                  ? "Read out loud. The script follows your voice."
-                  : "Start reading out loud. The script follows your voice."}
-            </span>
+            <span className={cn(mode === "pace" && !heard && "text-[#c2410c]")}>{hint}</span>
           </span>
           <span className="font-mono text-[12px] tracking-[0.1em] uppercase">
             Line {line + 1} of {lines.length}
@@ -640,27 +720,33 @@ export function ScriptStep({
         </div>
         <button
           type="button"
-          onClick={() => go(line + 1)}
+          onClick={() => goLine(line + 1)}
           aria-label={`Script line ${line + 1} of ${lines.length}: ${lines[line]}. Tap to skip ahead.`}
-          className="flex flex-col gap-4 text-center font-serif text-[24px] leading-[1.3] tracking-[-0.01em] sm:text-[32px]"
+          className="flex flex-col gap-4 text-center font-serif text-[24px] leading-[1.35] tracking-[-0.01em] sm:text-[32px]"
         >
           {visible.map((i) => (
             <p
               key={i}
               className={cn(
                 "m-0 transition-colors",
-                i < line && "text-stone-400",
-                i === line && "text-stone-950",
-                i > line && "text-stone-600",
+                i < line && "text-stone-300",
+                i > line && "text-stone-400",
+                i === line && mode !== "words" && "text-stone-950",
               )}
             >
-              {i === line ? <span className="bg-[#eef0e9] shadow-[0_0_0_6px_#eef0e9]">{lines[i]}</span> : lines[i]}
+              {i === line ? (
+                <span className="bg-[#eef0e9] px-1.5 py-0.5 box-decoration-clone">{renderCurrent(i)}</span>
+              ) : (
+                lines[i]
+              )}
             </p>
           ))}
         </button>
         <p className="m-0 text-center text-[13px] text-stone-500">
           {atEnd
-            ? "That's the last line. Press Finish recording when you're done."
+            ? lineDone
+              ? "That's the end. Press Finish recording."
+              : "Last line. Press Finish recording when you're done."
             : "Ahead or behind? Tap the script or press Space to skip a line."}
         </p>
       </div>
