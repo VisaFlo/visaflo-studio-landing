@@ -9,7 +9,7 @@ function HeroForm() {
   if (submitted) {
     return (
       <div role="status" className="text-right text-[16px] text-stone-950">
-        Request received. We&apos;ll contact {email} about your sample.
+        Request received. Check {email} for a link to record your face and voice.
       </div>
     )
   }

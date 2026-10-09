@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await sendWaitlistEmail(parsed.entry);
+    await sendWaitlistEmail(parsed.entry, new URL(request.url).origin);
   } catch (error) {
     console.error("Failed to email waitlist entry", error);
     return Response.json(
