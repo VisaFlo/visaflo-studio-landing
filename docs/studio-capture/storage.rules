@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Craft rules based on data in your Firestore database
+// allow write: if firestore.get(
+//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Profile avatars — owner-only
+    match /users/{uid}/{fileName=**} {
+      // getDownloadURL이 토큰을 받으려면 본인 read 필요
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // 업로드(생성/덮어쓰기): 본인 + 10MB 이하 + 이미지 타입만
+      allow create, update: if request.auth != null
+                            && request.auth.uid == uid
+                            && request.resource.size < 10 * 1024 * 1024
+                            && request.resource.contentType.matches('image/(png|jpeg|gif)');
+      // 이미지 제거 기능용 — delete는 request.resource가 없어서 분리 필수
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // VisaFlo Studio (studio.visaflo.ca): a signed-in person uploads the face
+    // and voice recording for their sample video, plus a small request.json,
+    // into their own folder. Write-only from the browser; the team reads them
+    // with the Admin SDK / console.
+    match /studio/{uid}/{submissionId}/{fileName} {
+      allow create, update: if request.auth != null
+                            && request.auth.uid == uid
+                            && (
+                              (fileName.matches('recording[.](mp4|webm|mov|m4v)')
+                                && request.resource.size < 500 * 1024 * 1024
+                                && request.resource.contentType.matches('video/.*'))
+                              || (fileName == 'request.json'
+                                && request.resource.size < 64 * 1024
+                                && request.resource.contentType == 'application/json')
+                            );
+    }
+
+    // 나머지는 전부 잠금 유지 (백엔드 Admin SDK는 규칙을 우회하므로 영향 없음)
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
