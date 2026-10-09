@@ -175,6 +175,7 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
   const [ready, setReady] = useState(false)
+  const [canSkip, setCanSkip] = useState(false)
   const poses = useRef<Pose[]>([])
   const allOkSince = useRef<number | null>(null)
   const faceOkSince = useRef<number | null>(null)
@@ -199,6 +200,13 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       ),
     )
   })
+
+  // Glasses, odd light or a slow phone can keep the checks from passing.
+  // After 25 seconds, let the person carry on anyway.
+  useEffect(() => {
+    const id = window.setTimeout(() => setCanSkip(true), 25_000)
+    return () => window.clearTimeout(id)
+  }, [])
 
   const unavailable = status === "unavailable"
   const live = status === "ready"
@@ -254,9 +262,16 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
           />
         </ul>
       )}
-      <PrimaryButton type="button" disabled={!(ready || unavailable)} onClick={start}>
-        Start head turn
-      </PrimaryButton>
+      <div className="flex flex-col gap-2">
+        <PrimaryButton type="button" disabled={!(ready || unavailable)} onClick={start}>
+          Start head turn
+        </PrimaryButton>
+        {canSkip && !ready && !unavailable && (
+          <QuietButton type="button" onClick={start}>
+            Continue anyway
+          </QuietButton>
+        )}
+      </div>
     </StageLayout>
   )
 }
@@ -366,6 +381,12 @@ export function ScriptStep({
   const startedAt = useRef(0)
   const lineStartedAt = useRef(0)
   const stopped = useRef(false)
+  // Kept in a ref so a parent re-render (new onStop identity) doesn't restart
+  // the prompter clock.
+  const stopRef = useRef(onStop)
+  useEffect(() => {
+    stopRef.current = onStop
+  })
 
   useEffect(() => {
     startedAt.current = performance.now()
@@ -383,11 +404,11 @@ export function ScriptStep({
       })
       if (seconds >= MAX_SECONDS && !stopped.current) {
         stopped.current = true
-        onStop()
+        stopRef.current()
       }
     }, 200)
     return () => window.clearInterval(id)
-  }, [lines, onStop])
+  }, [lines])
 
   // Reading faster than the prompter? Tap the script to move on.
   function advance() {
@@ -470,12 +491,14 @@ function Chip({ ok, children }: { ok: boolean; children: ReactNode }) {
 export function ReviewStep({
   recording,
   consent,
+  error,
   onConsent,
   onSubmit,
   onRedo,
 }: {
   recording: Recording
   consent: boolean
+  error?: string | null
   onConsent: (value: boolean) => void
   onSubmit: () => void
   onRedo: () => void
@@ -495,7 +518,7 @@ export function ReviewStep({
           playsInline
           controls={playing}
           onPlay={() => setPlaying(true)}
-          className={cn("size-full object-cover", recording.source === "camera" && "-scale-x-100")}
+          className={cn("size-full object-cover", recording.source === "camera" && !playing && "-scale-x-100")}
         />
         {!playing && (
           <button
@@ -541,6 +564,11 @@ export function ReviewStep({
           />
           <span>{CONSENT_TEXT}</span>
         </label>
+        {error && (
+          <p role="alert" className="m-0 text-[14px] leading-[1.5] text-[#c2410c]">
+            {error}
+          </p>
+        )}
         <div className="flex flex-col gap-2">
           <PrimaryButton type="button" disabled={!consent} onClick={onSubmit}>
             Submit recording

@@ -30,7 +30,12 @@ export async function POST(request: Request) {
 
   const submissionId = text(body.submissionId, 64)
   const recordingPath = text(body.recordingPath, 300)
-  if (!/^[\w-]+$/.test(submissionId) || !recordingPath.startsWith(`studio/${user.uid}/${submissionId}/`)) {
+  const folder = `studio/${user.uid}/${submissionId}/`
+  const validPath =
+    /^[\w-]+$/.test(submissionId) &&
+    recordingPath.startsWith(folder) &&
+    /^recording\.(mp4|webm|mov|m4v)$/.test(recordingPath.slice(folder.length))
+  if (!validPath) {
     return Response.json({ error: "That recording doesn't belong to this account." }, { status: 400 })
   }
   const topicTitle = text(body.topicTitle, 500)
@@ -45,6 +50,7 @@ export async function POST(request: Request) {
     await sendStudioRequestEmail({
       uid: user.uid,
       email: user.email ?? "unknown",
+      emailVerified: user.emailVerified,
       name: text(body.name),
       firm: text(body.firm),
       topicTitle,

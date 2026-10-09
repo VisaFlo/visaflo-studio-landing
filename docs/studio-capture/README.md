@@ -34,8 +34,9 @@ and request a sample video.
 1. **Storage rules** (Firebase console or CLI, project owner): publish
    `storage.rules` from this folder to the `devdashboard-c9159-ca` bucket. It
    is the live ruleset plus one `match /studio/{uid}/{submissionId}/{fileName}`
-   block; nothing else changes. Until then uploads fail with "We couldn't save
-   your recording".
+   block; nothing else changes. Publishing replaces the whole ruleset, so diff
+   it against the console's current rules first (it matched them on
+   2026-10-08). Until then uploads fail with "We couldn't save your recording".
 2. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
    email and password sign-in doesn't need an authorized domain.
 

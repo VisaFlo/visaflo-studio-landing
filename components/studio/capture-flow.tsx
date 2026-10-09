@@ -72,6 +72,8 @@ export function CaptureFlow() {
   const [sent, setSent] = useState<SentRequest | null>(null)
 
   const [stream, setStream] = useState<MediaStream | null>(null)
+  // Mirror of `stream` for cleanup paths (unmount) that can't rely on state.
+  const streamRef = useRef<MediaStream | null>(null)
   const [cameraBusy, setCameraBusy] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [baseline, setBaseline] = useState<Pose>({ yaw: 0, pitch: 0 })
@@ -81,6 +83,7 @@ export function CaptureFlow() {
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
   const [consentAt, setConsentAt] = useState<string | null>(null)
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   const submissionId = useRef<string | null>(null)
   const upload = useRef<UploadHandle | null>(null)
@@ -118,14 +121,19 @@ export function CaptureFlow() {
   }, [step])
 
   const stopCamera = useCallback(() => {
-    setStream((current) => {
-      current?.getTracks().forEach((t) => t.stop())
-      return null
-    })
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    setStream(null)
   }, [])
 
-  // Turn the camera off when leaving the page.
-  useEffect(() => () => stopCamera(), [stopCamera])
+  // Turn the camera and any running recorder off when leaving the page.
+  useEffect(
+    () => () => {
+      recorder.current?.cancel()
+      stopCamera()
+    },
+    [stopCamera],
+  )
 
   // Warn before closing the tab mid-recording or mid-upload.
   useEffect(() => {
@@ -147,6 +155,7 @@ export function CaptureFlow() {
         video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
+      streamRef.current = media
       setStream(media)
       setStep("align")
     } catch (error) {
@@ -182,6 +191,8 @@ export function CaptureFlow() {
     recorder.current = null
     if (!active) return
     const result = await active.stop()
+    // Restart was pressed while this clip was finishing: keep the new take.
+    if (recorder.current) return
     stopCamera()
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
@@ -194,6 +205,7 @@ export function CaptureFlow() {
         checks: { ...turnResult.current, voiceHeard: result.voiceHeard },
       }
     })
+    setReviewError(null)
     setStep("review")
   }, [stopCamera])
 
@@ -228,6 +240,7 @@ export function CaptureFlow() {
       if (previous) URL.revokeObjectURL(previous.url)
       return { blob: file, url, mime: file.type, seconds: 0, source: "upload" }
     })
+    setReviewError(null)
     setStep("review")
   }
 
@@ -252,6 +265,14 @@ export function CaptureFlow() {
 
   function submitRecording() {
     if (!user || !recording) return
+    if (recording.blob.size > MAX_UPLOAD_BYTES) {
+      setReviewError(
+        recording.source === "camera"
+          ? "This recording is over 500 MB. Record again and keep it to about a minute and a half."
+          : "That video is over 500 MB. Trim it to about a minute, then upload it.",
+      )
+      return
+    }
     setConsentAt(new Date().toISOString())
     // A new recording is a new submission.
     submissionId.current = null
@@ -264,12 +285,12 @@ export function CaptureFlow() {
     topicId === OWN_TOPIC_ID ? ownTopic.trim() : (TOPICS.find((t) => t.id === topicId)?.title ?? "")
 
   // "Make my sample" can be pressed while the upload is still running; the
-  // request goes out the moment the file is in.
-  useEffect(() => {
-    if (!sending || uploadState.status !== "done" || !user || !recording || !upload.current) return
+  // request goes out the moment the file is in. Everything it sends is read
+  // here, once, so changing the topic mid-wait can't send a second request.
+  async function makeSample() {
+    if (!topicTitle || !user || !recording || !upload.current || sending) return
     const handle = upload.current
-    let cancelled = false
-    submitSampleRequest(user, {
+    const request = {
       submissionId: submissionId.current ?? "",
       recordingPath: handle.path,
       recordingSeconds: recording.seconds,
@@ -281,36 +302,37 @@ export function CaptureFlow() {
       topicTitle,
       consent: CONSENT_TEXT,
       consentAt: consentAt ?? new Date().toISOString(),
-    })
-      .then(() => {
-        if (cancelled) return
-        const record = { topicTitle, at: new Date().toISOString() }
-        rememberSent(user.uid, record)
-        setSent(record)
-        track("studio_sample_requested", { topic: topicId, source: recording.source })
-        setStep("done")
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        console.error("Request failed", error)
-        setSendError(error instanceof Error ? error.message : "We couldn't send your request. Try again.")
-      })
-      .finally(() => {
-        if (!cancelled) setSending(false)
-      })
-    return () => {
-      cancelled = true
     }
-  }, [sending, uploadState.status, user, recording, profile, topicId, topicTitle, consentAt])
-
-  function makeSample() {
-    if (!topicTitle) return
     setSendError(null)
     setSending(true)
+    try {
+      await handle.done
+    } catch {
+      // The upload banner already says what went wrong and offers Retry.
+      setSending(false)
+      return
+    }
+    try {
+      await submitSampleRequest(user, request)
+      const record = { topicTitle: request.topicTitle, at: new Date().toISOString() }
+      rememberSent(user.uid, record)
+      setSent(record)
+      track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
+      setStep("done")
+    } catch (error) {
+      console.error("Request failed", error)
+      setSendError(error instanceof Error ? error.message : "We couldn't send your request. Try again.")
+    } finally {
+      setSending(false)
+    }
   }
 
   function startAnother() {
-    setRecording(null)
+    upload.current?.cancel()
+    setRecording((previous) => {
+      if (previous) URL.revokeObjectURL(previous.url)
+      return null
+    })
     setConsent(false)
     setTopicId(null)
     setOwnTopic("")
@@ -454,6 +476,7 @@ export function CaptureFlow() {
             recording={recording}
             consent={consent}
             onConsent={setConsent}
+            error={reviewError}
             onSubmit={submitRecording}
             onRedo={() => (recording.source === "camera" ? setStep("camera") : pickFile())}
           />
@@ -476,7 +499,7 @@ export function CaptureFlow() {
             sending={sending}
             waitingForUpload={sending && uploadState.status === "uploading"}
             error={sendError}
-            onSubmit={makeSample}
+            onSubmit={() => void makeSample()}
           />
         </>
       )}

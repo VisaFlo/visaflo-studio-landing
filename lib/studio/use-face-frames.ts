@@ -21,15 +21,21 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
   useEffect(() => {
     if (!video) return
     let cancelled = false
+    let gaveUp = false
     let raf = 0
     let last = 0
+    let failures = 0
     const giveUp = window.setTimeout(() => {
-      if (!cancelled) setStatus((s) => (s === "loading" ? "unavailable" : s))
+      if (cancelled) return
+      gaveUp = true
+      setStatus((s) => (s === "loading" ? "unavailable" : s))
     }, 20_000)
 
     loadFaceLandmarker()
       .then((landmarker) => {
-        if (cancelled) return
+        // A model that shows up after we gave up stays unused, so the
+        // controls don't flip back to waiting on checks.
+        if (cancelled || gaveUp) return
         window.clearTimeout(giveUp)
         setStatus("ready")
         const loop = (t: number) => {
@@ -38,8 +44,14 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
           last = t
           try {
             callback.current(readFace(landmarker, video, t))
+            failures = 0
           } catch {
-            // A dropped frame is fine; the next one will do.
+            // A dropped frame is fine; two seconds of them (lost GPU context
+            // after backgrounding, for one) means the tracker is gone.
+            if (++failures >= 30) {
+              cancelAnimationFrame(raf)
+              setStatus("unavailable")
+            }
           }
         }
         raf = requestAnimationFrame(loop)

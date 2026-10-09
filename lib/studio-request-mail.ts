@@ -10,6 +10,8 @@ const BUCKET = "devdashboard-c9159-ca"
 export type StudioRequestMail = {
   uid: string
   email: string
+  /** False for a new Studio account: anyone can sign up with any address. */
+  emailVerified: boolean
   name: string
   firm: string
   topicTitle: string
@@ -41,7 +43,7 @@ export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<
   const { text, html } = detailsTable([
     ["Firm name", entry.firm || "—"],
     ["Name", entry.name || "—"],
-    ["Email", entry.email],
+    ["Email", entry.emailVerified ? entry.email : `${entry.email} (not verified: new account, confirm before using their face)`],
     ["Topic", entry.topicTitle],
     ["Recording", `${minutes(entry.recordingSeconds)} (${entry.recordingSource}), ${checks}`],
     ["File", `gs://${BUCKET}/${entry.recordingPath}`],

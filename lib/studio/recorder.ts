@@ -18,6 +18,7 @@ export function pickRecordingMime(): string | undefined {
 export function extensionFor(mime: string): string {
   if (mime.includes("mp4")) return "mp4"
   if (mime.includes("quicktime")) return "mov"
+  if (mime.includes("x-m4v")) return "m4v"
   return "webm"
 }
 
