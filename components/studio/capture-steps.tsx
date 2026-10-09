@@ -649,6 +649,11 @@ export function ScriptStep({
   // Keyboard backup for when the prompter gets ahead or behind.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Leave Space/arrows alone on other controls (Finish, Start over), or a
+      // single key press would both skip a line and press the button.
+      const target = event.target as HTMLElement | null
+      if (target?.closest("input, textarea, select")) return
+      if (target?.closest("button") && !target.closest("[data-script]")) return
       const current = lineOfWord(script, pointerRef.current)
       if (event.key === " " || event.key === "ArrowDown" || event.key === "ArrowRight") {
         event.preventDefault()
@@ -725,6 +730,7 @@ export function ScriptStep({
         </div>
         <button
           type="button"
+          data-script
           onClick={() => goLine(line + 1)}
           aria-label={`Script line ${line + 1} of ${lines.length}: ${lines[line]}. Tap to skip ahead.`}
           className="flex flex-col gap-4 text-center font-serif text-[24px] leading-[1.35] tracking-[-0.01em] sm:text-[32px]"

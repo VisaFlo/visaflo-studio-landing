@@ -345,6 +345,8 @@ export function CaptureFlow() {
 
   async function signOut() {
     stopCamera()
+    // Don't leave a recording of their face on a shared computer.
+    if (user) await clearTake(user.uid)
     await signOutOfStudio()
     router.replace("/signin")
   }
