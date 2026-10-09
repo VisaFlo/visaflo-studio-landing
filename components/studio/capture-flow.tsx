@@ -94,7 +94,6 @@ export function CaptureFlow() {
   const [ownTopic, setOwnTopic] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
-  const filePicker = useRef<HTMLInputElement>(null)
 
   // Signed out: back to sign in. Signed in: load what we know about them.
   useEffect(() => {
@@ -184,10 +183,10 @@ export function CaptureFlow() {
       const name = error instanceof DOMException ? error.name : ""
       if (name === "NotAllowedError" || name === "SecurityError") setStep("blocked")
       else if (name === "NotFoundError" || name === "OverconstrainedError")
-        setCameraError("We couldn't find a camera and microphone. Plug one in, or upload a video instead.")
+        setCameraError("We couldn't find a camera and microphone. Plug one in, or open this page on your phone.")
       else if (name === "NotReadableError")
         setCameraError("Another app is using your camera. Close it (Zoom, Teams, FaceTime), then try again.")
-      else setCameraError("Your camera didn't start. Try again, or upload a video instead.")
+      else setCameraError("Your camera didn't start. Try again, or open this page on your phone.")
       if (step !== "camera") setStep(name === "NotAllowedError" || name === "SecurityError" ? "blocked" : "camera")
     } finally {
       setCameraBusy(false)
@@ -248,48 +247,6 @@ export function CaptureFlow() {
     setStep("review")
   }, [stopCamera, user])
 
-  function pickFile() {
-    filePicker.current?.click()
-  }
-
-  function onFile(file: File | undefined) {
-    if (!file) return
-    if (!file.type.startsWith("video/")) {
-      setCameraError("That file isn't a video. Choose an MP4 or MOV file.")
-      setStep("camera")
-      return
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setCameraError("That video is over 500 MB. Trim it to about a minute, then upload it.")
-      setStep("camera")
-      return
-    }
-    recorder.current?.cancel()
-    recorder.current = null
-    stopCamera()
-    const url = URL.createObjectURL(file)
-    const probe = document.createElement("video")
-    probe.preload = "metadata"
-    probe.onloadedmetadata = () => {
-      const seconds = Number.isFinite(probe.duration) ? Math.round(probe.duration) : 0
-      setRecording((r) => (r && r.url === url ? { ...r, seconds } : r))
-    }
-    probe.src = url
-    setRecording((previous) => {
-      if (previous) URL.revokeObjectURL(previous.url)
-      return { blob: file, url, mime: file.type, seconds: 0, source: "upload" }
-    })
-    if (user) {
-      const takeId = crypto.randomUUID()
-      void beginTake({ uid: user.uid, takeId, mime: file.type, source: "upload", startedAt: Date.now() })
-        .then(() => saveChunk(takeId, 0, file))
-        .then(() => finishTake(user.uid, { seconds: 0 }))
-    }
-    setReviewError(null)
-    setReviewNotice(null)
-    setStep("review")
-  }
-
   function startUpload(current: User, rec: Recording) {
     upload.current?.cancel()
     submissionId.current ??= newSubmissionId()
@@ -312,11 +269,7 @@ export function CaptureFlow() {
   function submitRecording() {
     if (!user || !recording) return
     if (recording.blob.size > MAX_UPLOAD_BYTES) {
-      setReviewError(
-        recording.source === "camera"
-          ? "This recording is over 500 MB. Record again and keep it to about a minute and a half."
-          : "That video is over 500 MB. Trim it to about a minute, then upload it.",
-      )
+      setReviewError("This recording is over 500 MB. Record again and keep it to about a minute and a half.")
       return
     }
     setConsentAt(new Date().toISOString())
@@ -408,18 +361,7 @@ export function CaptureFlow() {
     />
   )
 
-  const picker = (
-    <input
-      ref={filePicker}
-      type="file"
-      accept="video/*"
-      className="hidden"
-      onChange={(e) => {
-        onFile(e.target.files?.[0])
-        e.target.value = ""
-      }}
-    />
-  )
+
 
   if (step === "loading" || !user) {
     return (
@@ -432,7 +374,6 @@ export function CaptureFlow() {
 
   return (
     <Page>
-      {picker}
       {step === "about" && (
         <>
           {account}
@@ -468,10 +409,9 @@ export function CaptureFlow() {
               error={cameraError}
               busy={cameraBusy}
               onAllow={() => void openCamera()}
-              onUpload={pickFile}
             />
           ) : (
-            <CameraBlockedStep onRetry={() => void openCamera()} onUpload={pickFile} />
+            <CameraBlockedStep onRetry={() => void openCamera()} />
           )}
         </>
       )}
@@ -520,7 +460,7 @@ export function CaptureFlow() {
         <>
           <FlowHeader
             title="Review"
-            onBack={() => (recording.source === "camera" ? setStep("camera") : setStep("setup"))}
+            onBack={() => setStep("camera")}
           />
           <ReviewStep
             recording={recording}
@@ -529,7 +469,7 @@ export function CaptureFlow() {
             error={reviewError}
             notice={reviewNotice}
             onSubmit={submitRecording}
-            onRedo={() => (recording.source === "camera" ? setStep("camera") : pickFile())}
+            onRedo={() => setStep("camera")}
           />
         </>
       )}

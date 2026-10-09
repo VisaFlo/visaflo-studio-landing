@@ -67,13 +67,11 @@ export function CameraAllowStep({
   error,
   busy,
   onAllow,
-  onUpload,
 }: {
   unsupported: boolean
   error: string | null
   busy: boolean
   onAllow: () => void
-  onUpload: () => void
 }) {
   return (
     <StageLayout
@@ -96,7 +94,7 @@ export function CameraAllowStep({
     >
       {unsupported && (
         <p role="alert" className="m-0 text-[14px] leading-[1.5] text-[#c2410c]">
-          This browser can&apos;t record video. Open this page in Chrome or Safari, or upload a video instead.
+          This browser can&apos;t record video. Open this page in Chrome or Safari, or on your phone.
         </p>
       )}
       {error && (
@@ -110,11 +108,20 @@ export function CameraAllowStep({
             {busy ? "Waiting for your browser…" : "Allow camera and mic"}
           </PrimaryButton>
         )}
-        <QuietButton type="button" onClick={onUpload}>
-          Upload a video instead
-        </QuietButton>
       </div>
+      <PhoneHint />
     </StageLayout>
+  )
+}
+
+// Without a file-upload fallback, the way out of a missing or blocked camera
+// is the phone: the same link works there and keeps their account.
+function PhoneHint() {
+  return (
+    <p className="m-0 text-[14px] leading-[1.5] text-stone-600">
+      No camera on this computer? Open <span className="font-medium text-stone-950">studio.visaflo.ca/signin</span> on your
+      phone and sign in with the same email.
+    </p>
   )
 }
 
@@ -149,7 +156,7 @@ function blockedSteps(): ReactNode[] {
   ]
 }
 
-export function CameraBlockedStep({ onRetry, onUpload }: { onRetry: () => void; onUpload: () => void }) {
+export function CameraBlockedStep({ onRetry }: { onRetry: () => void }) {
   // Only ever shown after a click, never server-rendered, so reading the
   // user agent here is safe.
   const steps = blockedSteps()
@@ -182,10 +189,8 @@ export function CameraBlockedStep({ onRetry, onUpload }: { onRetry: () => void; 
         <PrimaryButton type="button" onClick={onRetry}>
           Try again
         </PrimaryButton>
-        <QuietButton type="button" onClick={onUpload}>
-          Upload a video instead
-        </QuietButton>
       </div>
+      <PhoneHint />
     </StageLayout>
   )
 }
@@ -888,7 +893,7 @@ export function ReviewStep({
             Submit recording
           </PrimaryButton>
           <QuietButton type="button" onClick={onRedo}>
-            {recording.source === "camera" ? "Record again" : "Choose another video"}
+            Record again
           </QuietButton>
         </div>
       </div>
