@@ -5,7 +5,10 @@ import { OWN_TOPIC_ID, TOPICS } from "@/lib/studio/content"
 import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
 import { PRICES, ttsCost } from "@/lib/studio/sample/costs"
 import { createVoice, synthesize } from "@/lib/studio/sample/elevenlabs"
-import { downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
+import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/fal"
+import { cutClip, downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
+import { submitSeedance } from "@/lib/studio/sample/higgsfield"
+import { OMNIHUMAN_PROMPT, scenePrompt } from "@/lib/studio/sample/prompts"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
 import { templateFor, templateId } from "@/lib/studio/sample/scripts"
 import type { SampleStatus, Stage, StageJob, StagePatch } from "@/lib/studio/sample/status"
@@ -132,4 +135,44 @@ const voice: StageWork = async ({ token, ref, status }) => {
   return { done: true, cost: ttsCost(text.length), patch: { voiceId, speechSeconds, assets } }
 }
 
-export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice }
+// Providers keep outputs for a limited time; copy them into our folder.
+export async function copyToSample(token: string, ref: SampleRef, url: string, name: string, contentType: string): Promise<string> {
+  const response = await fetch(url, { cache: "no-store" })
+  if (!response.ok) throw new Error(`Could not download ${name} from the provider (${response.status})`)
+  return uploadAsset(token, ref, name, new Uint8Array(await response.arrayBuffer()), contentType)
+}
+
+export function clipSeconds(speechSeconds: number): number {
+  return Math.min(30, Math.ceil(speechSeconds) + 1)
+}
+
+// A: their own footage, lips re-synced. B: Seedance scene from a face frame,
+// then lips re-synced (the poller chains it). C: OmniHuman from the frame in
+// one step. All three leave the provider job in status.json for the poller.
+const video: StageWork = async ({ token, ref, status }) => {
+  const speechUrl = status.assets["speech.mp3"]
+  if (!speechUrl || !status.speechSeconds) throw new Error("Run Voice first")
+  const seconds = clipSeconds(status.speechSeconds)
+  const { method, faceFrame, clipStart, layout, background, lipsync } = status.options
+
+  if (method === "real") {
+    const dir = await tmpDir()
+    const { file, seconds: recorded } = await downloadRecording(token, ref, dir)
+    const start = Math.max(0, Math.min(clipStart, recorded - seconds))
+    const clip = path.join(dir, "clip.mp4")
+    await cutClip(file, clip, { start, seconds, crop: layout === "full" })
+    const clipUrl = await uploadAsset(token, ref, "clip.mp4", await readFile(clip), "video/mp4")
+    const job = await submitFal(LIPSYNC_MODELS[lipsync], { video_url: clipUrl, audio_url: speechUrl, sync_mode: "cut_off" })
+    return { done: false, job: { ...job, step: "lipsync" } }
+  }
+
+  const faceUrl = status.assets[`face-${faceFrame}.jpg`]
+  if (!faceUrl) throw new Error("Pick a face frame first")
+  if (method === "scene") {
+    return { done: false, job: await submitSeedance({ imageUrl: faceUrl, audioUrl: speechUrl, prompt: scenePrompt(background), duration: seconds }) }
+  }
+  const job = await submitFal(OMNIHUMAN_MODEL, { image_url: faceUrl, audio_url: speechUrl, resolution: "720p", prompt: OMNIHUMAN_PROMPT })
+  return { done: false, job }
+}
+
+export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video }
