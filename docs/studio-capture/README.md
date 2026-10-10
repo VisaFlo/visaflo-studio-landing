@@ -39,16 +39,22 @@ and request a sample video.
   email gets a "Send verification email" button on the page.
 
 - **Sample pipeline**: on a submission's own page (`/admin/{uid}/{submissionId}`,
-  reached from the `/admin` list), "Make sample" runs
+  reached from the `/admin` list), one **Generate** button runs the six
+  steps in order and shows each one's state, time and cost as it goes:
   Prep (ffmpeg: voice sample + face frames) → Script (the topic's fixed,
-  pre-checked script from `lib/studio/sample/scripts.ts`; a "GPT draft"
-  button asks GPT-6 Sol for a fresh one from canada.ca) → Voice (ElevenLabs
-  clone + TTS with word timings) → Video (A: own footage + fal lipsync,
-  B: Higgsfield Seedance + lipsync, C: fal OmniHuman) → Audio (ElevenLabs
-  music + SFX) → Render (Remotion Lambda, or `npm run sample:render`
-  locally). Everything is written to `{submissionId}/sample/`, with
-  `status.json` as the ledger (stage states, job ids, costs). Design and
-  prompts: `docs/superpowers/specs/2026-10-09-studio-sample-pipeline-design.md`.
+  pre-checked script from `lib/studio/sample/scripts.ts`, already approved)
+  → Voice (ElevenLabs clone + TTS with word timings) → Video (A: own
+  footage + fal lipsync, B: Higgsfield Seedance + lipsync, C: fal OmniHuman)
+  → Audio (ElevenLabs music + SFX) → Render (Remotion Lambda, or
+  `npm run sample:render` locally). The run stops, with the reason under
+  the button, when a step fails, when method B or C still needs a face
+  frame picked, or when a GPT draft (the "GPT draft" button in the Script
+  card asks GPT-6 Sol for a fresh script from canada.ca) hasn't been
+  approved; "Continue" picks up from there. "Redo" on a finished step runs
+  it again and marks the steps built on it stale. Everything is written to
+  `{submissionId}/sample/`, with `status.json` as the ledger (stage states,
+  job ids, costs). Design and prompts:
+  `docs/superpowers/specs/2026-10-09-studio-sample-pipeline-design.md`.
   Keys: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` (Starter plan or higher for
   voice cloning), `FAL_KEY`, `HIGGSFIELD_KEY_ID/SECRET`, `REMOTION_*`.
   `npm run remotion:fixtures && npm run remotion:studio` previews the

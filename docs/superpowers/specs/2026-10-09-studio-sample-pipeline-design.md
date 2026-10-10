@@ -147,20 +147,30 @@ far".
 
 The submission detail gains a **Make sample** panel under the recording:
 
-1. **Options** — method (A/B/C with one-line descriptions and the price),
-   background (B), layout, mood. Saved on change.
-2. **Stage list** — Prep → Script → Voice → Video → Audio → Render → Send, each
-   with state, elapsed time, cost, a Run / Re-run button and the error text
-   when failed. Buttons for stages whose inputs aren't ready are disabled.
-3. **Prep result** — the five frames; click to pick. Method A also shows a
-   clip-start field.
-4. **Script editor** — headline, lines (tts text and caption text side by
-   side), cards, sources with links, GPT's fact list. Save, Approve. Voice is
-   disabled until approved.
-5. **Previews** — audio player for `speech.mp3`, video players for
+1. **Settings** — method (A/B/C with one-line descriptions and the price),
+   lipsync model, background (B), layout, mood; method A also shows a
+   clip-start field. Saved on change. After Prep, methods B and C show the
+   five face frames; click to pick.
+2. **Generate** — one button runs Prep → Script → Voice → Video → Audio →
+   Render in order (`lib/studio/sample/auto.ts` decides the next step from
+   `status.json`: the first stage not `done`, if nothing blocks it). Under
+   it, a six-segment progress bar and the step list, each with state,
+   elapsed time, cost and the error text when failed. The run stops — with
+   the reason under the button — when a step fails, when B/C has no face
+   frame yet, or when a GPT draft isn't approved; the button then reads
+   Continue (or Retry) and picks up from the first unfinished step. "Stop
+   after this step" ends the run early. A finished step has a "Redo" link;
+   redoing marks the steps built on it `stale`, which Continue reruns.
+3. **Script editor** — headline, lines (tts text and caption text side by
+   side), cards, sources with links, GPT's fact list. Save, Approve. The
+   topic's fixed script arrives approved; a "GPT draft" (button in the
+   Script card) does not, and Voice waits until it is. The `notes` steer is
+   API-only.
+4. **Outputs** — audio player for `speech.mp3`, video players for
    `talking.mp4` and `final.mp4`.
 
-The panel polls `GET status` every 5 s while any stage is `running`.
+The panel polls `GET poll` every 5 s while any stage is `running`; with
+Generate on, each new status starts the next step.
 
 ## Stages in detail, with prompts
 
@@ -252,7 +262,7 @@ Output schema (`strict: true`):
 ```
 
 The admin sees sources and facts next to the lines and fixes anything wrong
-before approving. Re-running Script with `notes` ("use the November draw",
+before approving. Re-running Script through the API with `notes` ("use the November draw",
 "shorter") is the steer.
 
 ### 3. Voice (ElevenLabs)
@@ -412,7 +422,7 @@ Mixpanel as `sample_feedback`. The token is a random id stored in
 ## Error handling
 
 - Provider errors: status and first 300 chars into `stages[x].error`; stage
-  `failed`; the Run button becomes Retry. Nothing downstream can run.
+  `failed`; the Generate button becomes Retry. Nothing downstream can run.
 - Timeouts: a job still running after 15 min (Seedance, lipsync, OmniHuman) or
   10 min (render) is marked `failed: "timed out; retry"`; the provider's own
   retention means a late result is just lost, not billed twice unless retried.

@@ -1,18 +1,17 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { ScriptEditor } from "@/components/studio/script-editor"
-import { ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
+import { ErrorText, MonoLabel, PrimaryButton, QuietButton, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
 import { useStudioUser } from "@/lib/studio/auth"
+import { AUTO_STAGES, nextAutoStep } from "@/lib/studio/sample/auto"
 import { getScript, getStatus, poll, runStage, saveOptions, saveScript } from "@/lib/studio/sample/client"
 import { audioCost, videoCost } from "@/lib/studio/sample/costs"
 import type { Script, ScriptFile } from "@/lib/studio/sample/script"
-import { blockers, STAGE_LABEL, STAGES, type SampleOptions, type SampleStatus, type Stage } from "@/lib/studio/sample/status"
+import { STAGE_LABEL, STAGES, type SampleOptions, type SampleStatus, type Stage } from "@/lib/studio/sample/status"
 import { cn } from "@/lib/utils"
-
-const RUNNABLE: Stage[] = ["prep", "script", "voice", "video", "audio", "render"]
 
 const STAGE_HELP: Record<Stage, string> = {
   prep: "Voice sample and five face frames from the recording",
@@ -58,10 +57,64 @@ export function SamplePanel({ submission }: { submission: Submission }) {
   const [script, setScript] = useState<ScriptFile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
-  const [notes, setNotes] = useState("")
+  // Generate pressed: keep starting the next stage until done, blocked or
+  // failed. The ref is what the async chain reads; the state is for the UI.
+  const autoRef = useRef(false)
+  const [auto, setAuto] = useState(false)
   const [tick, setTick] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const polling = useRef(false)
+
+  const stopAuto = useCallback(() => {
+    autoRef.current = false
+    setAuto(false)
+  }, [])
+
+  const act = useCallback(
+    async <T,>(key: Busy, work: () => Promise<T>): Promise<T | undefined> => {
+      setBusy(key)
+      setError(null)
+      try {
+        return await work()
+      } catch (e) {
+        stopAuto()
+        setError(e instanceof Error ? e.message : "Something went wrong.")
+      } finally {
+        setBusy(null)
+      }
+    },
+    [stopAuto],
+  )
+
+  const runOnce = useCallback(
+    (stage: Stage, body: Record<string, unknown> = {}) =>
+      act(stage, async () => {
+        if (!user) return
+        const next = await runStage(user, id, stage, body)
+        setStatus(next)
+        if (stage === "script") setScript(await getScript(user, id))
+        return next
+      }),
+    [act, user, id],
+  )
+
+  // With Generate on, start the next stage each time one finishes. Stages
+  // that finish inside the request (Prep, Script, Voice, Audio) chain here;
+  // ones that leave a provider job running (Video, Render) hand over to the
+  // poll loop, which calls this again with each new status. A failed stage,
+  // a missing face frame or an unapproved draft ends the run.
+  const continueAuto = useCallback(
+    async (from: SampleStatus | undefined) => {
+      let s = from
+      while (autoRef.current && s) {
+        const step = nextAutoStep(s)
+        if (step.kind === "wait") return
+        if (step.kind !== "run") return stopAuto()
+        s = await runOnce(step.stage)
+      }
+    },
+    [runOnce, stopAuto],
+  )
 
   useEffect(() => {
     if (!user) return
@@ -88,7 +141,10 @@ export function SamplePanel({ submission }: { submission: Submission }) {
       if (polling.current) return
       polling.current = true
       poll(user, id)
-        .then(setStatus)
+        .then((s) => {
+          setStatus(s)
+          void continueAuto(s)
+        })
         .catch((e: Error) => setError(e.message))
         .finally(() => {
           polling.current = false
@@ -98,30 +154,13 @@ export function SamplePanel({ submission }: { submission: Submission }) {
     return () => {
       if (timer.current) clearTimeout(timer.current)
     }
-  }, [user, id, running, status, tick])
+  }, [user, id, running, status, tick, continueAuto])
 
   if (!user) return null
 
-  async function act<T>(key: Busy, work: () => Promise<T>): Promise<T | undefined> {
-    setBusy(key)
-    setError(null)
-    try {
-      return await work()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.")
-    } finally {
-      setBusy(null)
-    }
-  }
-
+  const run = (stage: Stage, body: Record<string, unknown> = {}) => void runOnce(stage, body)
   const options = status?.options
   const setOption = (patch: Partial<SampleOptions>) => void act("options", async () => setStatus(await saveOptions(user, id, patch)))
-  const run = (stage: Stage, body: Record<string, unknown> = {}) =>
-    void act(stage, async () => {
-      const next = await runStage(user, id, stage, body)
-      setStatus(next)
-      if (stage === "script") setScript(await getScript(user, id))
-    })
   const onSaveScript = async (draft: Script, approved: boolean) => {
     const r = await saveScript(user, id, draft, approved)
     setStatus(r.status)
@@ -132,14 +171,38 @@ export function SamplePanel({ submission }: { submission: Submission }) {
 
   const seconds = Math.min(30, Math.ceil(status.speechSeconds ?? 26) + 1)
   const spent = STAGES.reduce((n, s) => n + (status.stages[s].cost ?? 0), 0)
-  const done = RUNNABLE.filter((s) => status.stages[s].state === "done").length
+  const done = AUTO_STAGES.filter((s) => status.stages[s].state === "done").length
+  const step = nextAutoStep(status)
+  const generating = auto
+  const current = step.kind === "done" ? null : step.stage
+  const currentIndex = current ? AUTO_STAGES.indexOf(current) : AUTO_STAGES.length
+
+  function generate() {
+    if (step.kind !== "run" && step.kind !== "retry") return
+    autoRef.current = true
+    setAuto(true)
+    void runOnce(step.stage).then(continueAuto)
+  }
+
+  const generateLabel = generating
+    ? `Generating… ${currentIndex + 1} of ${AUTO_STAGES.length} · ${current ? STAGE_LABEL[current] : ""}`
+    : step.kind === "done"
+      ? "All done"
+      : step.kind === "wait"
+        ? `Running ${STAGE_LABEL[step.stage]}…`
+        : step.kind === "retry"
+          ? `Retry ${STAGE_LABEL[step.stage]}`
+          : done > 0
+            ? "Continue"
+            : "Generate"
+  const canGenerate = !auto && busy === null && (step.kind === "run" || step.kind === "retry")
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-stone-200 pt-6">
         <h2 className="m-0 text-[22px] font-medium tracking-[-0.01em]">Make the sample</h2>
         <span className="text-[14px] text-stone-600">
-          {done} of {RUNNABLE.length} stages done · spent ${spent.toFixed(2)}
+          {done} of {AUTO_STAGES.length} steps done · spent ${spent.toFixed(2)}
         </span>
       </div>
 
@@ -225,12 +288,46 @@ export function SamplePanel({ submission }: { submission: Submission }) {
             )}
           </Section>
 
-          <Section title="Pipeline" aside="run top to bottom; re-running a stage resets the ones that use it">
+          <Section title="Generate" aside="six steps, run in order; redoing one redoes what was built on it">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <PrimaryButton type="button" className="h-11 px-6 text-[15px]" disabled={!canGenerate} onClick={generate}>
+                  {generateLabel}
+                </PrimaryButton>
+                {generating && (
+                  <QuietButton type="button" className="h-11" onClick={stopAuto}>
+                    Stop after this step
+                  </QuietButton>
+                )}
+                {step.kind === "blocked" && <span className="text-[13px] text-amber-700">{step.reasons.join(" ")} Then press Continue.</span>}
+                {step.kind === "retry" && !generating && status.stages[step.stage].error && (
+                  <span className="text-[13px] text-[#c2410c]">{STAGE_LABEL[step.stage]} failed. Retry picks up from there.</span>
+                )}
+              </div>
+              <div className="grid grid-cols-6 gap-1" aria-hidden>
+                {AUTO_STAGES.map((stage) => {
+                  const state = status.stages[stage].state
+                  return (
+                    <span
+                      key={stage}
+                      className={cn(
+                        "h-1",
+                        state === "done" && "bg-stone-950",
+                        state === "running" && "animate-pulse bg-amber-400",
+                        state === "failed" && "bg-[#c2410c]",
+                        state === "stale" && "bg-amber-200",
+                        state === "idle" && "bg-stone-200",
+                      )}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+
             <ol className="m-0 flex list-none flex-col divide-y divide-stone-200 p-0 text-[14px]">
-              {RUNNABLE.map((stage, i) => {
+              {AUTO_STAGES.map((stage, i) => {
                 const s = status.stages[stage]
-                const reasons = blockers(status, stage)
-                const blocked = busy !== null || s.state === "running" || reasons.length > 0
+                const redoable = (s.state === "done" || s.state === "stale") && busy === null && !running
                 return (
                   <li key={stage} className="grid grid-cols-[28px_1fr_auto] items-start gap-3 py-3">
                     <span
@@ -249,7 +346,7 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                       <span className="font-medium">
                         {STAGE_LABEL[stage]}
                         <span className={cn("ml-2 text-[12px] font-normal", s.state === "failed" ? "text-[#c2410c]" : s.state === "stale" ? "text-amber-700" : "text-stone-500")}>
-                          {s.state}
+                          {s.state === "idle" ? "waiting" : s.state}
                           {s.job?.step ? ` · ${s.job.step}` : ""}
                           {s.startedAt ? ` · ${elapsed(s)}` : ""}
                           {s.cost ? ` · $${s.cost.toFixed(2)}` : ""}
@@ -257,46 +354,47 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                       </span>
                       <span className="text-[13px] text-stone-600">{STAGE_HELP[stage]}</span>
                       {s.error && <span className="text-[13px] text-[#c2410c]">{s.error}</span>}
-                      {s.state !== "running" && reasons.length > 0 && <span className="text-[13px] text-stone-500">{reasons.join(" ")}</span>}
                       {stage === "render" && s.job?.provider === "local" && s.state === "running" && (
                         <span className="text-[13px] text-stone-600">
                           No Remotion Lambda configured. On a dev machine: <code>STUDIO_ADMIN_TOKEN=… npm run sample:render -- {id}</code>
                         </span>
                       )}
                     </span>
-                    <span className="flex gap-2">
-                      {stage === "script" && (
-                        <SecondaryButton type="button" className="h-9 px-3 text-[13px]" disabled={blocked} onClick={() => run("script", { source: "gpt", notes })}>
-                          GPT draft
-                        </SecondaryButton>
-                      )}
-                      <SecondaryButton type="button" className="h-9 px-3 text-[13px]" disabled={blocked} onClick={() => run(stage)}>
-                        {s.state === "done" || s.state === "stale" ? "Re-run" : s.state === "failed" ? "Retry" : "Run"}
-                      </SecondaryButton>
-                    </span>
+                    {redoable && (
+                      <QuietButton type="button" className="h-6 text-[13px]" onClick={() => run(stage)}>
+                        Redo
+                      </QuietButton>
+                    )}
                   </li>
                 )
               })}
             </ol>
-            <label className="flex flex-col gap-1 text-[13px]">
-              <span className="text-stone-600">Notes for a GPT draft</span>
-              <input
-                className="h-9 border border-stone-950/16 px-3 text-[14px]"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. use the latest draw, keep it under 70 words"
-              />
-            </label>
           </Section>
         </div>
 
         {/* Right: the script and what came out */}
         <div className="flex flex-col gap-6">
-          <Section title="Script" aside={script ? `${script.model} · ${script.approved ? "approved" : "draft"}` : "run Script first"}>
+          <Section
+            title="Script"
+            aside={
+              <span className="flex items-center gap-3">
+                {script ? `${script.model} · ${script.approved ? "approved" : "draft, approve before Voice"}` : "appears after step 2"}
+                <SecondaryButton
+                  type="button"
+                  className="h-8 px-3 text-[13px]"
+                  disabled={busy !== null || running}
+                  onClick={() => run("script", { source: "gpt" })}
+                  title="Ask GPT-6 Sol for a fresh script from this week's canada.ca pages. You approve it before Voice runs."
+                >
+                  GPT draft
+                </SecondaryButton>
+              </span>
+            }
+          >
             {script ? (
               <ScriptEditor key={script.createdAt + (script.editedAt ?? "")} file={script} busy={busy !== null} onSave={onSaveScript} />
             ) : (
-              <p className="m-0 text-[14px] text-stone-500">The topic&apos;s script appears here after the Script stage.</p>
+              <p className="m-0 text-[14px] text-stone-500">The topic&apos;s script appears here after step 2. Edit or approve it any time; Voice re-runs from the saved text.</p>
             )}
           </Section>
 
