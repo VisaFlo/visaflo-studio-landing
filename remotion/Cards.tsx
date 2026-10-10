@@ -3,7 +3,7 @@ import { Audio, Sequence, spring, useCurrentFrame, useVideoConfig } from "remoti
 import { countUp } from "./count-up"
 import { FONTS } from "./fonts"
 import { longDate, type Look } from "./palette"
-import { scheduleCards, topCard, type TimedCard } from "./schedule"
+import { CARD_SECONDS, scheduleCards, topCard, type TimedCard } from "./schedule"
 import { FPS, HEADLINE_FROM, type Card, type Word } from "./types"
 
 export function valueSize(value: string, max = 118): number {
@@ -102,11 +102,13 @@ export function Cards(props: {
     since = current.at
     key = `${current.line}-${current.label}`
     body = <CardBody card={current} look={props.look} local={frame - Math.round(current.at * FPS)} />
-  } else if (t >= HEADLINE_FROM && t < firstAt) {
+  } else if (t >= HEADLINE_FROM && t < Math.min(firstAt, HEADLINE_FROM + CARD_SECONDS)) {
     since = HEADLINE_FROM
     key = "headline"
     body = <HeadlineBody headline={props.headline} published={props.published} look={props.look} />
   }
+  // A card that times out (rather than being replaced) fades for a beat.
+  const leaving = since === null ? 1 : Math.min(1, Math.max(0, (since + CARD_SECONDS - t) / 0.25))
 
   const entrances: TimedCard[] = timed.filter((c) => c.scene !== "takeover")
   const whooshAt = [...(firstAt > HEADLINE_FROM ? [HEADLINE_FROM] : []), ...entrances.map((c) => c.at)]
@@ -145,7 +147,7 @@ export function Cards(props: {
           boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
           transform: `scale(${0.92 + 0.08 * enter})`,
           transformOrigin: "50% 0%",
-          opacity: Math.min(1, local / 5),
+          opacity: Math.min(1, local / 5) * leaving,
         }}
       >
         {body}

@@ -63,6 +63,10 @@ describe("scheduleCards and topCard", () => {
     expect(topCard(timed, 7)?.label).toBe("3 draws down")
     expect(topCard(timed, 12)?.label).toBe("Score close?")
   })
+  it("lets a card go after six seconds, as the samples do, so the last one doesn't sit to the end", () => {
+    expect(topCard(timed, 14.9)?.label).toBe("Score close?")
+    expect(topCard(timed, 15.1)).toBeNull()
+  })
 })
 
 describe("takeoverSegments", () => {

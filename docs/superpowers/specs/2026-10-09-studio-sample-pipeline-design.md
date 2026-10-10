@@ -402,7 +402,7 @@ for big numbers (`remotion/fonts.ts`, Google Fonts).
   ~250 px above the bottom; Poppins 700 at 58 px, white with a soft shadow,
   no box; words not yet spoken are 45 % white and brighten as they are
   said. Text from `caption_text`, never from the TTS text.
-- **Top slot** (`Cards.tsx`): one card at a time, 60 px from the sides at
+- **Top slot** (`Cards.tsx`): one card at a time (for up to 6 s, as in the samples, unless the next replaces it), 60 px from the sides at
   the top, 30 px radius, palette card colour. From 0.4 s the headline card
   ("IRCC NOTICE · <date>" + headline); then each overlay card replaces the
   last. A `stat` card is label (24 px caps, letter-spaced, accent) → value

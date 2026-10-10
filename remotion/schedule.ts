@@ -49,11 +49,15 @@ export function scheduleCards(cards: Card[], words: Word[]): TimedCard[] {
   return timed.sort(byTime)
 }
 
-// The card in the top slot: the latest overlay card so far. Takeover cards
-// live in their own scene, never in the slot.
+/** A card stays this long unless another replaces it. */
+export const CARD_SECONDS = 6
+
+// The card in the top slot: the latest overlay card still within its time.
+// Takeover cards live in their own scene, never in the slot.
 export function topCard(timed: TimedCard[], t: number): TimedCard | null {
   const shown = timed.filter((c) => c.scene !== "takeover" && c.at <= t)
-  return shown.length ? shown[shown.length - 1] : null
+  const last = shown[shown.length - 1]
+  return last && t < last.at + CARD_SECONDS ? last : null
 }
 
 export type Takeover = { start: number; end: number; cards: TimedCard[] }
