@@ -41,3 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 .gstack/
+
+# Remotion fixture media (synthesised by scripts/make-fixtures.sh) and local renders
+remotion/fixtures/*.mp4
+remotion/fixtures/*.mp3
+out/
