@@ -10,7 +10,7 @@ import { AUTO_STAGES, nextAutoStep } from "@/lib/studio/sample/auto"
 import { getScript, getStatus, poll, runStage, saveOptions, saveScript } from "@/lib/studio/sample/client"
 import { audioCost, videoCost } from "@/lib/studio/sample/costs"
 import type { Script, ScriptFile } from "@/lib/studio/sample/script"
-import { STAGE_LABEL, STAGES, type SampleOptions, type SampleStatus, type Stage } from "@/lib/studio/sample/status"
+import { blockers, STAGE_LABEL, STAGES, type SampleOptions, type SampleStatus, type Stage } from "@/lib/studio/sample/status"
 import { cn } from "@/lib/utils"
 
 const STAGE_HELP: Record<Stage, string> = {
@@ -178,16 +178,27 @@ export function SamplePanel({ submission }: { submission: Submission }) {
   const currentIndex = current ? AUTO_STAGES.indexOf(current) : AUTO_STAGES.length
 
   function generate() {
+    if (step.kind === "done") return regenerate()
     if (step.kind !== "run" && step.kind !== "retry") return
     autoRef.current = true
     setAuto(true)
     void runOnce(step.stage).then(continueAuto)
   }
 
+  // From the top: Prep and Script again (Script doesn't depend on Prep, so
+  // it has to be asked for), then everything they made stale.
+  async function regenerate() {
+    autoRef.current = true
+    setAuto(true)
+    const afterPrep = await runOnce("prep")
+    if (!afterPrep || afterPrep.stages.prep.state !== "done") return stopAuto()
+    await continueAuto(await runOnce("script"))
+  }
+
   const generateLabel = generating
     ? `Generating… ${currentIndex + 1} of ${AUTO_STAGES.length} · ${current ? STAGE_LABEL[current] : ""}`
     : step.kind === "done"
-      ? "All done"
+      ? "Re-generate"
       : step.kind === "wait"
         ? `Running ${STAGE_LABEL[step.stage]}…`
         : step.kind === "retry"
@@ -195,7 +206,8 @@ export function SamplePanel({ submission }: { submission: Submission }) {
           : done > 0
             ? "Continue"
             : "Generate"
-  const canGenerate = !auto && busy === null && (step.kind === "run" || step.kind === "retry")
+  const canGenerate = !auto && busy === null && (step.kind === "run" || step.kind === "retry" || step.kind === "done")
+  const canStartOver = !auto && busy === null && !running && done > 0 && step.kind !== "done"
 
   return (
     <div className="flex flex-col gap-6">
@@ -300,7 +312,7 @@ export function SamplePanel({ submission }: { submission: Submission }) {
             )}
           </Section>
 
-          <Section title="Generate" aside="six steps, run in order; redoing one redoes what was built on it">
+          <Section title="Generate" aside="six steps in order; re-running one marks what was built on it for a re-run">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-3">
                 <PrimaryButton type="button" className="h-11 px-6 text-[15px]" disabled={!canGenerate} onClick={generate}>
@@ -309,6 +321,11 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                 {generating && (
                   <QuietButton type="button" className="h-11" onClick={stopAuto}>
                     Stop after this step
+                  </QuietButton>
+                )}
+                {canStartOver && (
+                  <QuietButton type="button" className="h-11" onClick={() => void regenerate()}>
+                    Start over from Prep
                   </QuietButton>
                 )}
                 {step.kind === "blocked" && <span className="text-[13px] text-amber-700">{step.reasons.join(" ")} Then press Continue.</span>}
@@ -339,7 +356,8 @@ export function SamplePanel({ submission }: { submission: Submission }) {
             <ol className="m-0 flex list-none flex-col divide-y divide-stone-200 p-0 text-[14px]">
               {AUTO_STAGES.map((stage, i) => {
                 const s = status.stages[stage]
-                const redoable = (s.state === "done" || s.state === "stale") && busy === null && !running
+                const reasons = blockers(status, stage)
+                const canRun = busy === null && !running && reasons.length === 0
                 return (
                   <li key={stage} className="grid grid-cols-[28px_1fr_auto] items-start gap-3 py-3">
                     <span
@@ -374,11 +392,15 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                         </span>
                       )}
                     </span>
-                    {redoable && (
-                      <QuietButton type="button" className="h-6 text-[13px]" onClick={() => run(stage)}>
-                        Redo
-                      </QuietButton>
-                    )}
+                    <SecondaryButton
+                      type="button"
+                      className="h-8 px-3 text-[13px] disabled:border-stone-200 disabled:text-stone-400"
+                      disabled={!canRun}
+                      title={reasons.join(" ") || undefined}
+                      onClick={() => run(stage)}
+                    >
+                      {s.state === "done" || s.state === "stale" ? "Re-run" : s.state === "failed" ? "Retry" : "Run"}
+                    </SecondaryButton>
                   </li>
                 )
               })}

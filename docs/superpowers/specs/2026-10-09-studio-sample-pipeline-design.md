@@ -159,8 +159,12 @@ The submission detail gains a **Make sample** panel under the recording:
    the reason under the button — when a step fails, when B/C has no face
    frame yet, or when a GPT draft isn't approved; the button then reads
    Continue (or Retry) and picks up from the first unfinished step. "Stop
-   after this step" ends the run early. A finished step has a "Redo" link;
-   redoing marks the steps built on it `stale`, which Continue reruns.
+   after this step" ends the run early. With all six done the button reads
+   "Re-generate": Prep again, Script again, then everything they made
+   stale; "Start over from Prep" does the same from a partly done state.
+   Every step also has its own Run / Re-run / Retry button (disabled, with
+   the reason as a tooltip, while its inputs aren't ready); re-running one
+   marks the steps built on it `stale`, which Continue reruns.
 3. **Script editor** — headline, lines (tts text and caption text side by
    side), cards, sources with links, GPT's fact list. Save, Approve. The
    topic's fixed script arrives approved; a "GPT draft" (button in the

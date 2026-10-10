@@ -57,8 +57,10 @@ and request a sample video.
   the button, when a step fails, when method B or C still needs a face
   frame picked, or when a GPT draft (the "GPT draft" button in the Script
   card asks GPT-6 Sol for a fresh script from canada.ca) hasn't been
-  approved; "Continue" picks up from there. "Redo" on a finished step runs
-  it again and marks the steps built on it stale. Everything is written to
+  approved; "Continue" picks up from there. Once everything is done the
+  button reads "Re-generate" and starts again from Prep (and Script).
+  Each step also has its own Run / Re-run / Retry button; re-running one
+  marks the steps built on it stale. Everything is written to
   `{submissionId}/sample/`, with `status.json` as the ledger (stage states,
   job ids, costs). The final cut copies the landing samples' look (Poppins
   captions that brighten word by word, one card at a time at the top in
