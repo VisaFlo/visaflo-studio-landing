@@ -64,7 +64,7 @@ firebase emulators:start --only auth,storage,firestore --project demo-studio
 # Terminal 2: the app, pointed at the emulators (dev builds only)
 NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
 
-# Storage rules matrix (17 cases, including the admin reads) against the running emulators
+# Storage rules matrix (20 cases, including the admin reads and writes) against the running emulators
 node docs/studio-capture/rules-test.mjs
 ```
 

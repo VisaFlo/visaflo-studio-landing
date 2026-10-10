@@ -61,6 +61,23 @@ await setVerified(false)
 await adminRead("DENY", "admin, email not verified, read + list")
 await setVerified(true)
 await adminRead("ALLOW", "admin, email verified, read + list")
+
+// The admin also writes the generated sample next to the recording; nobody
+// else can write there, not even the owner.
+async function tryWrite(label, path, expect) {
+  let got
+  try { await uploadBytes(ref(st, path), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
+  if (got !== expect) fail++
+  console.log(`${got === expect ? "ok  " : "FAIL"} ${label}: ${got}`)
+}
+await as(ADMIN)
+await tryWrite("admin writes sample/status.json", `studio/${a}/s1/sample/status.json`, "ALLOW")
+await setVerified(false)
+await as(ADMIN)
+await tryWrite("unverified admin writes sample/status.json", `studio/${a}/s1/sample/status.json`, "DENY")
+await setVerified(true)
+await as(`sdk-a-${stamp}@example.test`)
+await tryWrite("owner writes own sample/status.json", `studio/${a}/s1/sample/status.json`, "DENY")
 await as(`sdk-b-${stamp}@example.test`)
 try { await list(ref(st, "studio/")); console.log("FAIL other user lists studio/: ALLOW"); fail++ } catch (e) { console.log(`ok   other user lists studio/: ${e.code === "storage/unauthorized" ? "DENY" : e.code}`) }
 console.log(fail ? `${fail} FAILED` : "all passed")
