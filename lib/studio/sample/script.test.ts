@@ -90,3 +90,19 @@ describe("helpers", () => {
     expect(u).toContain("use the cap numbers")
   })
 })
+
+describe("validateScript card kinds", () => {
+  const card = { line: 0, label: "Score close to 518?", value: "Keep your Express Entry profile up to date", sub: null }
+  it("lets a note card carry a sentence, up to 60 characters", () => {
+    expect(validateScript({ ...good, cards: [{ ...card, kind: "note" }] }).ok).toBe(true)
+    expect(validateScript({ ...good, cards: [{ ...card, kind: "note", value: "x".repeat(61) }] }).ok).toBe(false)
+  })
+  it("keeps stat values short", () => {
+    expect(validateScript({ ...good, cards: [card] }).ok).toBe(false)
+    expect(validateScript({ ...good, cards: [{ ...card, value: "2,000" }] }).ok).toBe(true)
+  })
+  it("accepts the takeover scene flag and nothing else", () => {
+    expect(validateScript({ ...good, cards: [{ ...card, value: "2,000", scene: "takeover" }] }).ok).toBe(true)
+    expect(validateScript({ ...good, cards: [{ ...card, value: "2,000", scene: "popup" }] }).ok).toBe(false)
+  })
+})

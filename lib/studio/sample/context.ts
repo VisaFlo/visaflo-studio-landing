@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/studio/admin-auth"
 import { defaultStatus, type SampleOptions, type SampleStatus } from "@/lib/studio/sample/status"
 import { StorageError, storageJson, storageUpload } from "@/lib/studio/storage"
+import { PALETTES } from "@/remotion/types"
 
 export type SampleRef = { uid: string; submissionId: string; folder: string; sampleFolder: string }
 
@@ -49,6 +50,7 @@ const METHODS = ["real", "scene", "portrait"] as const
 const BACKGROUNDS = ["office", "studio", "street"] as const
 const LAYOUTS = ["boxed", "full"] as const
 const MOODS = ["calm", "energetic"] as const
+const PALETTE_CHOICES = ["auto", ...PALETTES] as const
 const LIPSYNC = ["standard", "pro"] as const
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], current: T): T {
@@ -64,6 +66,7 @@ export function parseOptions(value: unknown, current: SampleOptions): SampleOpti
     background: pick(v.background, BACKGROUNDS, current.background),
     layout: pick(v.layout, LAYOUTS, current.layout),
     mood: pick(v.mood, MOODS, current.mood),
+    palette: pick(v.palette, PALETTE_CHOICES, current.palette ?? "auto"),
     lipsync: pick(v.lipsync, LIPSYNC, current.lipsync),
     faceFrame: Number.isInteger(faceFrame) && faceFrame >= 1 && faceFrame <= 5 ? faceFrame : current.faceFrame,
     clipStart: Number.isFinite(clipStart) && clipStart >= 0 && clipStart <= 170 ? clipStart : current.clipStart,

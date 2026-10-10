@@ -1,3 +1,5 @@
+import type { Palette } from "@/remotion/types"
+
 // status.json for one sample: which stages ran, what they produced, what
 // they cost. Pure functions so the routes stay thin and this stays testable.
 export const STAGES = ["prep", "script", "voice", "video", "audio", "render", "send"] as const
@@ -12,6 +14,8 @@ export type SampleOptions = {
   background: Background
   layout: "boxed" | "full"
   mood: "calm" | "energetic"
+  /** Card colours; auto = the look the topic's landing sample has. Missing on older status files = auto. */
+  palette?: "auto" | Palette
   /** sync lipsync-2 (standard, $3/min) or lipsync-2-pro ($5/min). */
   lipsync: LipsyncModel
   /** 1–5, which face-N.jpg to use for scene and portrait. */
@@ -83,7 +87,7 @@ export const TIMEOUT_MINUTES: Record<Stage, number> = {
 export function defaultStatus(): SampleStatus {
   return {
     version: 1,
-    options: { method: "real", background: "office", layout: "full", mood: "calm", lipsync: "pro", clipStart: 2 },
+    options: { method: "real", background: "office", layout: "full", mood: "calm", palette: "auto", lipsync: "pro", clipStart: 2 },
     assets: {},
     stages: Object.fromEntries(STAGES.map((s) => [s, { state: "idle" }])) as Record<Stage, StageState>,
   }
@@ -166,6 +170,17 @@ export function mergeStageResult(fresh: SampleStatus, ran: SampleStatus, stage: 
   next = patchStage(next, stage, ran.stages[stage])
   for (const key of PRODUCES[stage]) if (ran[key] !== undefined) next = { ...next, [key]: ran[key] }
   return { ...next, assets: { ...fresh.assets, ...ran.assets } }
+}
+
+// A re-run marks everything built on the stage stale before it knows what
+// changed. When the work finds its output unchanged for some dependents
+// (same script lines → same voice), those get their pre-run state back.
+export function keepStages(before: SampleStatus, after: SampleStatus, stages: Stage[]): SampleStatus {
+  let next = after
+  for (const s of stages) {
+    if (before.stages[s].state === "done" && next.stages[s].state === "stale") next = patchStage(next, s, before.stages[s])
+  }
+  return next
 }
 
 export function setJob(status: SampleStatus, stage: Stage, job: StageJob): SampleStatus {

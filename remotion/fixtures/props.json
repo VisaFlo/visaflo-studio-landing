@@ -474,16 +474,27 @@
       "line": 1,
       "label": "Invitations",
       "value": "1,000",
-      "sub": "Healthcare & social services"
+      "sub": "Healthcare & social services",
+      "scene": "takeover"
     },
     {
       "line": 2,
       "label": "CRS cut-off",
       "value": "462",
-      "sub": null
+      "sub": "Down from 470"
+    },
+    {
+      "line": 3,
+      "label": "Score close?",
+      "value": "Keep your Express Entry profile up to date",
+      "sub": null,
+      "kind": "note"
     }
   ],
-  "layout": "boxed",
+  "layout": "full",
   "headline": "Express Entry draw invites 1,000 healthcare workers",
-  "speechSeconds": 25
+  "speechSeconds": 25,
+  "palette": "wine",
+  "published": "2026-09-29",
+  "topicTitle": "Express Entry"
 }

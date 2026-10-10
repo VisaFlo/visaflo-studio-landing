@@ -5,6 +5,7 @@ import {
   defaultStatus,
   failStage,
   finishStage,
+  keepStages,
   markStale,
   mergeStageResult,
   startStage,
@@ -148,5 +149,25 @@ describe("timedOut", () => {
     expect(timedOut(s.stages.video, new Date("2026-10-09T10:16:00Z"), "video")).toBe(true)
     const r = startStage(defaultStatus(), "render", started)
     expect(timedOut(r.stages.render, new Date("2026-10-09T10:11:00Z"), "render")).toBe(true)
+  })
+})
+
+describe("keepStages", () => {
+  it("gives back stages a re-run marked stale when their input turned out unchanged", () => {
+    const before = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice", "video", "audio", "render")
+    const after = finishStage(startStage(before, "script"), "script", { scriptApproved: true })
+    expect(after.stages.voice.state).toBe("stale")
+    const kept = keepStages(before, after, ["voice", "video", "audio"])
+    expect(kept.stages.voice).toEqual(before.stages.voice)
+    expect(kept.stages.video.state).toBe("done")
+    expect(kept.stages.audio.state).toBe("done")
+    // Render still used the old cards, so it stays stale; script is the fresh run.
+    expect(kept.stages.render.state).toBe("stale")
+    expect(kept.stages.script.state).toBe("done")
+  })
+  it("doesn't resurrect a stage that wasn't done before", () => {
+    const before = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script")
+    const after = finishStage(startStage(before, "script"), "script", { scriptApproved: true })
+    expect(keepStages(before, after, ["voice"]).stages.voice.state).toBe("idle")
   })
 })

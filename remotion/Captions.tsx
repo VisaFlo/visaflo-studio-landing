@@ -1,39 +1,47 @@
 import { useCurrentFrame } from "remotion"
 
-import { groupWords } from "./group-words"
+import { FONTS } from "./fonts"
+import { groupWords, splitLines } from "./group-words"
 import { FPS, type Word } from "./types"
 
-// Lower-third karaoke captions: the current group in white, the spoken word
-// highlighted. Kept well above the bottom for platform UI.
+// Captions as in the landing samples: a phrase at a time on one or two
+// centred lines in the lower part of the frame, words brightening as they
+// are spoken, no box.
 export function Captions({ words, layout }: { words: Word[]; layout: "boxed" | "full" }) {
   const t = useCurrentFrame() / FPS
   const group = groupWords(words).find((g) => t >= g.start && t < g.end)
   if (!group) return null
+  const lines = splitLines(group.words)
   return (
     <div
       style={{
         position: "absolute",
-        left: 60,
-        right: 60,
-        bottom: layout === "boxed" ? 420 : 300,
+        left: 50,
+        right: 50,
+        bottom: layout === "boxed" ? 420 : 250,
         textAlign: "center",
-        fontSize: 64,
+        fontFamily: FONTS.body,
+        fontSize: 58,
         fontWeight: 700,
-        lineHeight: 1.15,
-        textShadow: "0 4px 24px rgba(0,0,0,0.8)",
+        lineHeight: 1.2,
+        textShadow: "0 3px 16px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.55)",
       }}
     >
-      {group.words.map((w, i) => {
-        const active = t >= w.start && t <= w.end + 0.05
-        return (
-          <span
-            key={i}
-            style={{ color: active ? "#fbbf24" : "white", marginRight: 18, display: "inline-block", transform: active ? "scale(1.06)" : "none" }}
-          >
-            {w.word}
-          </span>
-        )
-      })}
+      {lines.map((line, i) => (
+        <div key={i}>
+          {line.map((w, j) => (
+            <span
+              key={j}
+              style={{
+                color: t >= w.start - 0.04 ? "#ffffff" : "rgba(255,255,255,0.45)",
+                marginRight: j < line.length - 1 ? 15 : 0,
+              }}
+            >
+              {w.word}
+            </span>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

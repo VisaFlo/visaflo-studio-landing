@@ -383,24 +383,43 @@ sfx-pop     duration 0.5  "gentle single pop, notification tick, soft, dry"
 ### 6. Render (Remotion)
 
 Composition `Sample`, 1080×1920, 30 fps, duration = speech + 1.5 s tail.
-Props: `talkingUrl, speechUrl, musicUrl, sfx, words, cards, lines, layout,
-headline`.
+Props: `talkingUrl, speechUrl, musicUrl, sfx, words, cards, layout,
+headline, published, topicTitle, palette`. The look is the landing samples',
+taken frame by frame from `outreach/studio_sample_videos/*.mp4`
+(720×1280, 24 fps): Poppins for captions, labels and sentences, Bebas Neue
+for big numbers (`remotion/fonts.ts`, Google Fonts).
 
 - **Layout** `full` (default): `talking.mp4` fills the 9:16 frame like a
-  phone video (a 16:9 clip is centre-cropped with `object-fit: cover`);
-  cards top, captions lower third over the picture. `boxed`: the 16:9 clip
-  sits in a rounded frame in the middle band of a dark background; cards
-  above, captions below.
-- **Captions**: groups of 3–5 words from `words.json`, lower third, 120 px
-  safe margin, current word highlighted (weight + colour), group swaps on the
-  first word of the next group. Text from `caption_text`, never from the TTS
-  text.
-- **Cards**: appear on the first word of their `line` (with `sfx-pop`), slide
-  in from above with `sfx-whoosh` on the first card, stack up to 3 in the top
-  headroom, each built label → value → sub over 400 ms. Rules carried from
-  the landing samples: never show an empty card, value never wraps (shrink
-  font until one line), cards never cover the face (top band only; in `full`
-  layout the band is the top 28 %).
+  phone video (a 16:9 clip is centre-cropped with `object-fit: cover`).
+  `boxed`: the 16:9 clip sits in a rounded frame in the middle band of a
+  dark background.
+- **Palette** (`remotion/palette.ts`): `navy` (pink label), `wine` (gold),
+  `forest` (mint), `paper` (white card, red label) — the four looks the
+  samples use; `options.palette: auto` picks by topic
+  (`lib/studio/sample/palette.ts`).
+- **Captions** (`Captions.tsx`): a phrase of up to six words, one line for
+  three words or fewer, otherwise two lines of about equal width, centred
+  ~250 px above the bottom; Poppins 700 at 58 px, white with a soft shadow,
+  no box; words not yet spoken are 45 % white and brighten as they are
+  said. Text from `caption_text`, never from the TTS text.
+- **Top slot** (`Cards.tsx`): one card at a time, 60 px from the sides at
+  the top, 30 px radius, palette card colour. From 0.4 s the headline card
+  ("IRCC NOTICE · <date>" + headline); then each overlay card replaces the
+  last. A `stat` card is label (24 px caps, letter-spaced, accent) → value
+  (Bebas Neue up to 118 px, shrunk to one line; numbers ≥ 100 count up over
+  0.5 s) → sub (28 px, muted). A `note` card's value is a sentence (Poppins
+  600 at 40 px; "\n" rows, "• " rows get a dot). Entrance: 0.9→1 scale
+  spring + fade, `sfx-whoosh` at 45 %.
+- **Timing** (`schedule.ts`): a card shows on the word that says its number
+  ("2,000", "$23,448", "2027"), else at the start of its line; two cards
+  landing together are spaced a second apart; an overlay card whose number
+  comes just before the next card starts with its line instead.
+- **Takeover** (`Takeover.tsx`): cards marked `scene: "takeover"` on the
+  same or adjacent lines make one scene from the first card's line start to
+  the start of the line after the last: the picture crossfades (0.3 s) to a
+  dark palette gradient with broad diagonal bands, topic + headline + date
+  at the top, and the stat cards (Bebas Neue up to 170 px) popping in on
+  their words with `sfx-pop`. Three of the five samples do this.
 - **Audio**: `speech.mp3` at 0 dB, music at −16 dB with a 1 s fade in and a
   1.5 s fade out, music ducked a further −4 dB while a word is active; the
   video's own track is muted.

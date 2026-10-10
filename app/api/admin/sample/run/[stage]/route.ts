@@ -1,6 +1,6 @@
 import { jsonBody, openSample, readStatus, storageFailure, writeStatus } from "@/lib/studio/sample/context"
 import { describeError, STAGE_WORK } from "@/lib/studio/sample/stages"
-import { blockers, failStage, finishStage, mergeStageResult, setJob, STAGES, startStage, type Stage } from "@/lib/studio/sample/status"
+import { blockers, failStage, finishStage, keepStages, mergeStageResult, setJob, STAGES, startStage, type Stage } from "@/lib/studio/sample/status"
 
 // Downloads, ffmpeg and provider calls can take a few minutes.
 export const maxDuration = 300
@@ -25,20 +25,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ sta
     return storageFailure(error) ?? Response.json({ error: "We couldn't save the sample status." }, { status: 500 })
   }
 
+  let keep: Stage[] = []
   try {
     const outcome = await work({ token, ref, status, body })
     status = outcome.done
       ? finishStage(status, stage as Stage, { cost: outcome.cost, ...outcome.patch })
       : setJob(status, stage as Stage, outcome.job)
+    if (outcome.done) keep = outcome.keep ?? []
   } catch (error) {
     console.error(`Sample stage ${stage} failed for ${ref.folder}`, error)
     status = failStage(status, stage as Stage, describeError(error))
   }
 
   // The poller may have moved other stages on while this ran: lay only this
-  // stage's result over a fresh copy.
+  // stage's result over a fresh copy. Dependents the work vouched for get
+  // their pre-run state back.
   try {
-    const merged = mergeStageResult(await readStatus(token, ref), status, stage as Stage)
+    const merged = keepStages(sample.status, mergeStageResult(await readStatus(token, ref), status, stage as Stage), keep)
     await writeStatus(token, ref, merged)
     return Response.json(merged)
   } catch (error) {

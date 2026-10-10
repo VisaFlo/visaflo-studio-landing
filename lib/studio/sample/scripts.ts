@@ -24,8 +24,10 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
       { tts_text: "Follow along for next week's update.", caption_text: "Follow along for next week's update." },
     ],
     cards: [
-      { line: 1, label: "Invitations", value: "2,000", sub: "Canadian Experience Class" },
-      { line: 2, label: "CRS cut-off", value: "518", sub: "521 → 519 → 518" },
+      { line: 1, label: "Invitations", value: "2,000", sub: "Canadian Experience Class", scene: "takeover" },
+      { line: 1, label: "CRS cut-off", value: "518", sub: "Down from 519", scene: "takeover" },
+      { line: 2, label: "CEC cut-off · 3 draws down", value: "518", sub: "521 → 519 → 518" },
+      { line: 3, label: "Score close to 518?", value: "Keep your Express Entry profile up to date", sub: null, kind: "note" },
     ],
     sources: [
       {
@@ -63,8 +65,11 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
       { tts_text: "Follow along for next week's update.", caption_text: "Follow along for next week's update." },
     ],
     cards: [
-      { line: 1, label: "Study without a permit", value: "6 months", sub: "Valid work permit holders" },
-      { line: 3, label: "Runs until", value: "Dec 31, 2027", sub: "Full-time study still needs a permit" },
+      { line: 1, label: "Study for up to", value: "6 months", sub: "Work permit holders in Canada", scene: "takeover" },
+      { line: 1, label: "Study permit", value: "Not required", sub: "Or until your work permit ends", scene: "takeover" },
+      { line: 2, label: "Who it's for", value: "• Tradespeople\n• Nurses\n• Lab technicians", sub: "Upgrade skills while you keep working", kind: "note" },
+      { line: 3, label: "Still required", value: "Full-time studies need a study permit", sub: null, kind: "note" },
+      { line: 3, label: "In effect until", value: "Dec 31, 2027", sub: null },
     ],
     sources: [
       {
@@ -105,8 +110,10 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
       { tts_text: "Follow along for next week's update.", caption_text: "Follow along for next week's update." },
     ],
     cards: [
-      { line: 1, label: "Proof of funds", value: "$23,448", sub: "Single student, living costs" },
-      { line: 1, label: "In effect since", value: "Sept 1", sub: "On top of tuition" },
+      { line: 1, label: "In effect since", value: "Sept 1", sub: "Single applicant, outside Quebec", scene: "takeover" },
+      { line: 1, label: "Living costs · minimum", value: "$23,448", sub: "On top of tuition", scene: "takeover" },
+      { line: 2, label: "Old amount on statements?", value: "Check before you apply", sub: "Below the minimum can mean a refusal", kind: "note" },
+      { line: 3, label: "Not sure where you stand?", value: "Talk to a licensed professional", sub: null, kind: "note" },
     ],
     sources: [
       {
@@ -140,8 +147,9 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
       { tts_text: "Follow along for next week's update.", caption_text: "Follow along for next week's update." },
     ],
     cards: [
-      { line: 1, label: "PGP intake", value: "Paused", sub: "Existing files still processed" },
-      { line: 3, label: "Super visa stay", value: "5 years", sub: "Valid for up to 10 years" },
+      { line: 1, label: "New PGP applications", value: "Paused", sub: "Existing files still processed" },
+      { line: 2, label: "Another option", value: "Super Visa", sub: "For parents and grandparents" },
+      { line: 3, label: "Super visa stay", value: "5 years", sub: "Per visit · valid for up to 10 years" },
     ],
     sources: [
       {
@@ -191,8 +199,7 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
     ],
     cards: [
       { line: 0, label: "PR applications waiting", value: "~250,000", sub: "Latest government data" },
-      { line: 2, label: "Family sponsorship", value: "4 in 10", sub: null },
-      { line: 2, label: "Work-based PR", value: "1 in 5", sub: null },
+      { line: 2, label: "Family sponsorship", value: "4 in 10", sub: "Work-based PR: about 1 in 5" },
       { line: 3, label: "Work permit extension", value: "100+ days", sub: "Apply early" },
     ],
     sources: [

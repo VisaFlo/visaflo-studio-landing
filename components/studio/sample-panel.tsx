@@ -253,6 +253,18 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                   ["energetic", "Energetic"],
                 ]}
               />
+              <Select
+                label="Look (card colours)"
+                value={options.palette ?? "auto"}
+                onChange={(v) => setOption({ palette: v as SampleOptions["palette"] })}
+                options={[
+                  ["auto", "Auto, by topic"],
+                  ["navy", "Navy · pink"],
+                  ["wine", "Wine · gold"],
+                  ["forest", "Forest · mint"],
+                  ["paper", "Paper · red"],
+                ]}
+              />
               {options.method === "real" && (
                 <label className="flex flex-col gap-1">
                   <span className="text-stone-600">Clip starts at (s)</span>

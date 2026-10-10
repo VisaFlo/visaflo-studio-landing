@@ -4,11 +4,13 @@ import type { JobPoll } from "@/lib/studio/sample/fal"
 import type { Script } from "@/lib/studio/sample/script"
 import type { SampleStatus, StageJob } from "@/lib/studio/sample/status"
 import type { Word } from "@/lib/studio/sample/words"
-import type { SampleProps } from "@/remotion/types"
+import type { Palette, SampleProps } from "@/remotion/types"
 
 const ASSETS = ["talking.mp4", "speech.mp3", "music.mp3", "sfx-whoosh.mp3", "sfx-pop.mp3"] as const
 
-export function renderProps(status: SampleStatus, script: Script, words: Word[]): SampleProps {
+export type Look = { palette: Palette; topicTitle: string }
+
+export function renderProps(status: SampleStatus, script: Script, words: Word[], look: Look): SampleProps {
   for (const name of ASSETS) if (!status.assets[name]) throw new Error(`Missing ${name}; run the stage that makes it`)
   if (!status.speechSeconds) throw new Error("Run Voice first")
   return {
@@ -21,6 +23,9 @@ export function renderProps(status: SampleStatus, script: Script, words: Word[])
     cards: script.cards,
     layout: status.options.layout,
     headline: script.headline,
+    published: script.published,
+    topicTitle: look.topicTitle,
+    palette: look.palette,
     speechSeconds: status.speechSeconds,
   }
 }

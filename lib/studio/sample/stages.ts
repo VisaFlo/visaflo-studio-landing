@@ -9,6 +9,7 @@ import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/
 import { cutClip, downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
 import { submitSeedance } from "@/lib/studio/sample/higgsfield"
 import { localRenderAvailable, MANUAL_RENDER_JOB, spawnLocalRender } from "@/lib/studio/sample/local-render"
+import { paletteFor } from "@/lib/studio/sample/palette"
 import { MUSIC_PROMPT, OMNIHUMAN_PROMPT, scenePrompt, SFX } from "@/lib/studio/sample/prompts"
 import { lambdaConfigured, renderProps, startLambdaRender } from "@/lib/studio/sample/render"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
@@ -17,7 +18,15 @@ import type { SampleStatus, Stage, StageJob, StagePatch } from "@/lib/studio/sam
 import { wordsFromAlignment, type Word } from "@/lib/studio/sample/words"
 import { listObjects, mediaUrl, storageBytes, storageGet, storageJson, storageMeta, storageUpload, StorageError } from "@/lib/studio/storage"
 
-export type StageOutcome = { done: true; cost?: number; patch?: StagePatch } | { done: false; job: StageJob }
+export type StageOutcome =
+  | {
+      done: true
+      cost?: number
+      patch?: StagePatch
+      /** Dependents this run did not actually invalidate (e.g. a script re-run with the same lines keeps the voice). */
+      keep?: Stage[]
+    }
+  | { done: false; job: StageJob }
 export type StageContext = { token: string; ref: SampleRef; status: SampleStatus; body: Record<string, unknown> }
 export type StageWork = (ctx: StageContext) => Promise<StageOutcome>
 
@@ -100,8 +109,12 @@ const script: StageWork = async ({ token, ref, body }) => {
   } else {
     file = { draft: templateFor(request.topicId), approved: true, model: `template:${templateId(request.topicId)}`, createdAt, searchSources: [] }
   }
+  // Same spoken lines as before (say, the template's cards were updated):
+  // the voice and the video made from it are still right, only Render isn't.
+  const previous = await storageJson<ScriptFile>(token, sampleFile(ref, "script.json")).catch(() => null)
+  const sameLines = previous ? JSON.stringify(previous.draft.lines) === JSON.stringify(file.draft.lines) : false
   await storageUpload(token, sampleFile(ref, "script.json"), JSON.stringify(file, null, 2), "application/json")
-  return { done: true, cost, patch: { scriptApproved: file.approved } }
+  return { done: true, cost, patch: { scriptApproved: file.approved }, ...(sameLines ? { keep: ["voice", "video", "audio"] as Stage[] } : {}) }
 }
 
 export const MAX_SPEECH_SECONDS = 30
@@ -197,7 +210,13 @@ const audio: StageWork = async ({ token, ref, status }) => {
 const render: StageWork = async ({ token, ref, status }) => {
   const file = await storageJson<ScriptFile>(token, sampleFile(ref, "script.json"))
   const words = await storageJson<Word[]>(token, sampleFile(ref, "words.json"))
-  const props = renderProps(status, file.draft, words)
+  const request = await storageJson<RequestJson>(token, `${ref.folder}/request.json`).catch(() => ({}) as RequestJson)
+  const topic = TOPICS.find((t) => t.id === request.topicId)
+  const chosen = status.options.palette ?? "auto"
+  const props = renderProps(status, file.draft, words, {
+    palette: chosen === "auto" ? paletteFor(request.topicId) : chosen,
+    topicTitle: topic?.detail ?? request.topicTitle ?? "",
+  })
   if (lambdaConfigured()) return { done: false, job: await startLambdaRender(props) }
   await uploadAsset(token, ref, "render-props.json", JSON.stringify(props), "application/json")
   return { done: false, job: localRenderAvailable() ? spawnLocalRender(`${ref.uid}/${ref.submissionId}`, token) : MANUAL_RENDER_JOB }

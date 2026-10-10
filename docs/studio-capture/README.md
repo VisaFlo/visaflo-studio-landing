@@ -60,7 +60,11 @@ and request a sample video.
   approved; "Continue" picks up from there. "Redo" on a finished step runs
   it again and marks the steps built on it stale. Everything is written to
   `{submissionId}/sample/`, with `status.json` as the ledger (stage states,
-  job ids, costs). Design and prompts:
+  job ids, costs). The final cut copies the landing samples' look (Poppins
+  captions that brighten word by word, one card at a time at the top in
+  the topic's palette, full-screen "takeover" stats on marked cards; see
+  the spec's Render section). Redoing Script with unchanged lines keeps the
+  voice, video and audio and only re-renders. Design and prompts:
   `docs/superpowers/specs/2026-10-09-studio-sample-pipeline-design.md`.
   Keys: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` (Starter plan or higher for
   voice cloning), `FAL_KEY`, `HIGGSFIELD_KEY_ID/SECRET`, `REMOTION_*`.

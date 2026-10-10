@@ -1,7 +1,18 @@
 import OpenAI from "openai"
 
 export type ScriptLine = { tts_text: string; caption_text: string }
-export type ScriptCard = { line: number; label: string; value: string; sub: string | null }
+export type ScriptCard = {
+  line: number
+  label: string
+  value: string
+  sub: string | null
+  /** stat (default): a number or short phrase, up to 12 characters. note: a sentence, up to 60. */
+  kind?: "stat" | "note"
+  /** takeover: shown full-screen without the person, with the other takeover cards on nearby lines. */
+  scene?: "takeover"
+}
+
+export const NOTE_VALUE_MAX = 60
 export type Script = {
   headline: string
   published: string
@@ -122,10 +133,14 @@ export function validateScript(value: unknown): { ok: true; script: Script } | {
   })
   const total = scriptWords(s)
   if (total < 50 || total > 100) errors.push(`script has ${total} words; aim for 65–85`)
-  if (s.cards.length > 4) errors.push("more than 4 cards")
+  // GPT is asked for 2–4; the fixed scripts carry up to 6 (takeover pairs).
+  if (s.cards.length > 6) errors.push("more than 6 cards")
   s.cards.forEach((c, i) => {
     if (!c || !Number.isInteger(c.line) || c.line < 0 || c.line >= s.lines.length) errors.push(`card ${i}: line index out of range`)
-    if (!c || typeof c.value !== "string" || !c.value.trim() || c.value.length > 12) errors.push(`card ${i}: value must be 1–12 characters`)
+    const max = c?.kind === "note" ? NOTE_VALUE_MAX : 12
+    if (!c || typeof c.value !== "string" || !c.value.trim() || c.value.length > max) errors.push(`card ${i}: value must be 1–${max} characters`)
+    if (c && c.kind != null && c.kind !== "stat" && c.kind !== "note") errors.push(`card ${i}: kind must be stat or note`)
+    if (c && c.scene != null && c.scene !== "takeover") errors.push(`card ${i}: scene can only be takeover`)
     if (!c || typeof c.label !== "string" || !c.label.trim() || c.label.length > 28) errors.push(`card ${i}: label must be 1–28 characters`)
     if (c && c.sub != null && (typeof c.sub !== "string" || c.sub.length > 40)) errors.push(`card ${i}: sub must be at most 40 characters`)
   })
