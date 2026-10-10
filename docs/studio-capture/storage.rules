@@ -20,8 +20,13 @@ service firebase.storage {
 
     // VisaFlo Studio (studio.visaflo.ca): a signed-in person uploads the face
     // and voice recording for their sample video, plus a small request.json,
-    // into their own folder. Write-only from the browser; the team reads them
-    // with the Admin SDK / console.
+    // into their own folder. Write-only for them; only the Studio admin
+    // account (studio.visaflo.ca/admin) can list and read every submission.
+    match /studio/{allPaths=**} {
+      allow read: if request.auth != null
+                  && request.auth.token.email == 'bkim@vflo.app'
+                  && request.auth.token.email_verified == true;
+    }
     match /studio/{uid}/{submissionId}/{fileName} {
       allow create, update: if request.auth != null
                             && request.auth.uid == uid

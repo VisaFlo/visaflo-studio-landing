@@ -29,14 +29,24 @@ and request a sample video.
   file sits under that uid, and emails the team inbox
   (`[VisaFlo Studio] New sample recording`) through the existing SendGrid key.
 
+- **Admin**: `/admin` lists every submission (name, firm, email, topic,
+  checks, consent) with the recording playable in the page, including people
+  who recorded but never picked a topic. Only `bkim@vflo.app` with a verified
+  email gets in (`lib/studio/admin.ts`, and the same email in
+  `storage.rules`). `GET /api/admin/submissions` reads the bucket through the
+  Firebase Storage API with that person's own ID token, so the storage rules
+  decide access and there is still no service account. An unverified admin
+  email gets a "Send verification email" button on the page.
+
 ## Before it works in production
 
 1. **Storage rules** (Firebase console or CLI, project owner): publish
    `storage.rules` from this folder to the `devdashboard-c9159-ca` bucket. It
-   is the live ruleset plus one `match /studio/{uid}/{submissionId}/{fileName}`
-   block; nothing else changes. Publishing replaces the whole ruleset, so diff
-   it against the console's current rules first (it matched them on
-   2026-10-08). Until then uploads fail with "We couldn't save your recording".
+   is the live ruleset plus two `studio/` blocks (owner writes, admin reads);
+   nothing else changes. Publishing replaces the whole ruleset, so diff it
+   against the console's current rules first (it matched them on
+   2026-10-08). Until then uploads fail with "We couldn't save your recording"
+   and `/admin` says "Storage refused the read".
 2. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
    email and password sign-in doesn't need an authorized domain.
 
@@ -54,7 +64,7 @@ firebase emulators:start --only auth,storage,firestore --project demo-studio
 # Terminal 2: the app, pointed at the emulators (dev builds only)
 NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
 
-# Storage rules matrix (14 cases) against the running emulators
+# Storage rules matrix (17 cases, including the admin reads) against the running emulators
 node docs/studio-capture/rules-test.mjs
 ```
 

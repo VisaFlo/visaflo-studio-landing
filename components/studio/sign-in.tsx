@@ -20,6 +20,13 @@ import { AccountHeader, Display, ErrorText, Field, Page, PrimaryButton, QuietBut
 type Mode = "sign-in" | "sign-up" | "code" | "reset-sent"
 
 const START = "/start"
+// Pages that can send someone here and get them back after sign-in.
+const RETURN_PAGES = ["/admin"]
+
+function afterSignIn(): string {
+  const next = new URLSearchParams(window.location.search).get("next")
+  return next && RETURN_PAGES.includes(next) ? next : START
+}
 
 export function SignIn() {
   const router = useRouter()
@@ -34,13 +41,13 @@ export function SignIn() {
 
   // Already signed in (this browser, or VisaFlo's session restored): go on.
   useEffect(() => {
-    if (user && mode !== "code") router.replace(START)
+    if (user && mode !== "code") router.replace(afterSignIn())
   }, [user, mode, router])
 
   function finish(kind: "sign-in" | "sign-up") {
     identify(email.trim().toLowerCase())
     track(kind === "sign-up" ? "studio_sign_up" : "studio_sign_in")
-    router.replace(START)
+    router.replace(afterSignIn())
   }
 
   async function onSubmit(event: FormEvent) {
