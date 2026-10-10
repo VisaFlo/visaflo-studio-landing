@@ -174,7 +174,18 @@ The panel polls `GET status` every 5 s while any stage is `running`.
   speech length: `-ss {clipStart} -t {ceil(speechSeconds)+1}`; for `layout:
   full` also `-vf crop=608:1080:656:0,scale=1080:1920`.
 
-### 2. Script (GPT-6 Sol)
+### 2. Script
+
+**Default: one fixed script per topic.** Decided 2026-10-09 while building:
+everyone who picks a topic gets the same pre-checked script, so the stage is
+instant, free and consistent with the landing page. The five scripts live in
+`lib/studio/sample/scripts.ts` and are the landing-sample scripts
+(Express Entry draw, work-permit study measure, study-permit proof of funds,
+PGP pause + super visa, and a general PR-backlog script for "own topic").
+They start approved; the admin can still edit or un-approve in `/admin`.
+
+**Opt-in: GPT-6 Sol writes a fresh one** (`source: "gpt"` on the Script
+run) for this week's news. That draft starts unapproved. Details:
 
 Responses API, `model: "gpt-6-sol"`, `reasoning: { effort: "medium" }`,
 `tools: [{ type: "web_search", filters: { allowed_domains: ["canada.ca"] } }]`,

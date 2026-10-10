@@ -120,7 +120,9 @@ export function setJob(status: SampleStatus, stage: Stage, job: StageJob): Sampl
   return patchStage(status, stage, { ...status.stages[stage], job })
 }
 
-export type StagePatch = { cost?: number } & Partial<Pick<SampleStatus, "voiceId" | "speechSeconds" | "recordingSeconds" | "assets">>
+export type StagePatch = { cost?: number } & Partial<
+  Pick<SampleStatus, "voiceId" | "speechSeconds" | "recordingSeconds" | "scriptApproved" | "assets">
+>
 
 export function finishStage(status: SampleStatus, stage: Stage, patch: StagePatch = {}, now = new Date()): SampleStatus {
   const { cost, assets, ...rest } = patch
