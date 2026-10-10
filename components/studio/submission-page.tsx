@@ -118,7 +118,7 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
 
       <section className="grid grid-cols-1 gap-6 border border-stone-200 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
         {s.video ? (
-          <video src={s.video.url} controls playsInline preload="metadata" className="w-full bg-stone-950 object-contain" />
+          <video src={s.video.url} controls playsInline preload="metadata" className="max-h-[480px] max-w-full bg-stone-950" />
         ) : (
           <div className="flex aspect-video items-center justify-center bg-stone-100 text-[14px] text-stone-600">
             No playable video. Open the folder in Firebase.

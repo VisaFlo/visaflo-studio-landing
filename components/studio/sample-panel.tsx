@@ -448,13 +448,13 @@ export function SamplePanel({ submission }: { submission: Submission }) {
               {status.assets["talking.mp4"] && (
                 <div className="flex flex-col gap-1 text-[13px] text-stone-600">
                   Talking video
-                  <video controls playsInline preload="metadata" src={status.assets["talking.mp4"]} className="max-h-[520px] w-full bg-stone-950 object-contain" />
+                  <video controls playsInline preload="metadata" src={status.assets["talking.mp4"]} className="max-h-[560px] max-w-full bg-stone-950" />
                 </div>
               )}
               {status.assets["final.mp4"] && (
                 <div className="flex flex-col gap-1 text-[13px] text-stone-600">
                   Final
-                  <video controls playsInline preload="metadata" src={status.assets["final.mp4"]} className="max-h-[520px] w-full bg-stone-950 object-contain" />
+                  <video controls playsInline preload="metadata" src={status.assets["final.mp4"]} className="max-h-[560px] max-w-full bg-stone-950" />
                   <a href={status.assets["final.mp4"]} target="_blank" rel="noreferrer" className="underline">
                     Open final.mp4
                   </a>
