@@ -3,12 +3,12 @@ import path from "node:path"
 
 import { OWN_TOPIC_ID, TOPICS } from "@/lib/studio/content"
 import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
-import { PRICES, ttsCost } from "@/lib/studio/sample/costs"
-import { createVoice, synthesize } from "@/lib/studio/sample/elevenlabs"
+import { audioCost, PRICES, ttsCost } from "@/lib/studio/sample/costs"
+import { composeMusic, createVoice, soundEffect, synthesize } from "@/lib/studio/sample/elevenlabs"
 import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/fal"
 import { cutClip, downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
 import { submitSeedance } from "@/lib/studio/sample/higgsfield"
-import { OMNIHUMAN_PROMPT, scenePrompt } from "@/lib/studio/sample/prompts"
+import { MUSIC_PROMPT, OMNIHUMAN_PROMPT, scenePrompt, SFX } from "@/lib/studio/sample/prompts"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
 import { templateFor, templateId } from "@/lib/studio/sample/scripts"
 import type { SampleStatus, Stage, StageJob, StagePatch } from "@/lib/studio/sample/status"
@@ -175,4 +175,16 @@ const video: StageWork = async ({ token, ref, status }) => {
   return { done: false, job }
 }
 
-export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video }
+// A music bed a little longer than the speech, plus the two card sounds.
+const audio: StageWork = async ({ token, ref, status }) => {
+  if (!status.speechSeconds) throw new Error("Run Voice first")
+  const assets: Record<string, string> = {}
+  const music = await composeMusic(MUSIC_PROMPT[status.options.mood], (status.speechSeconds + 3) * 1000)
+  assets["music.mp3"] = await uploadAsset(token, ref, "music.mp3", music, "audio/mpeg")
+  for (const sfx of SFX) {
+    assets[`${sfx.name}.mp3`] = await uploadAsset(token, ref, `${sfx.name}.mp3`, await soundEffect(sfx.text, sfx.seconds), "audio/mpeg")
+  }
+  return { done: true, cost: audioCost(status.speechSeconds), patch: { assets } }
+}
+
+export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video, audio }
