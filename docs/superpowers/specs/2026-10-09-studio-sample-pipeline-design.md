@@ -101,7 +101,7 @@ type SampleStatus = {
   options: {
     method: "real" | "scene" | "portrait"   // A, B, C
     background: "office" | "studio" | "street"   // B only
-    layout: "boxed" | "full"                // boxed = 16:9 clip in a frame, full = 9:16 crop
+    layout: "boxed" | "full"                // full (default) = 9:16 like a phone video, boxed = 16:9 clip in a frame
     mood: "calm" | "energetic"
     faceFrame?: number                      // 1–5
     clipStart?: number                      // A: seconds into the recording, default 15
@@ -386,9 +386,11 @@ Composition `Sample`, 1080×1920, 30 fps, duration = speech + 1.5 s tail.
 Props: `talkingUrl, speechUrl, musicUrl, sfx, words, cards, lines, layout,
 headline`.
 
-- **Layout** `full`: `talking.mp4` fills the frame. `boxed` (default for A):
-  the 16:9 clip sits in a rounded frame in the middle band; cards above,
-  captions below.
+- **Layout** `full` (default): `talking.mp4` fills the 9:16 frame like a
+  phone video (a 16:9 clip is centre-cropped with `object-fit: cover`);
+  cards top, captions lower third over the picture. `boxed`: the 16:9 clip
+  sits in a rounded frame in the middle band of a dark background; cards
+  above, captions below.
 - **Captions**: groups of 3–5 words from `words.json`, lower third, 120 px
   safe margin, current word highlighted (weight + colour), group swaps on the
   first word of the next group. Text from `caption_text`, never from the TTS

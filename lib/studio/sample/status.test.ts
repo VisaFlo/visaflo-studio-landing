@@ -17,6 +17,12 @@ function withDone(status: SampleStatus, ...stages: Stage[]): SampleStatus {
   return stages.reduce((s, stage) => finishStage(startStage(s, stage), stage), status)
 }
 
+describe("defaultStatus", () => {
+  it("fills the vertical frame like a phone video unless the admin picks the boxed layout", () => {
+    expect(defaultStatus().options.layout).toBe("full")
+  })
+})
+
 describe("blockers", () => {
   it("lets prep and script run on a fresh status", () => {
     const s = defaultStatus()

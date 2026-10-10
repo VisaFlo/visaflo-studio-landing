@@ -26,7 +26,7 @@ describe("renderProps", () => {
       sfxPopUrl: "p",
       words,
       cards: [{ line: 0, label: "L", value: "V", sub: null }],
-      layout: "boxed",
+      layout: "full",
       headline: "H",
       speechSeconds: 24.5,
     })

@@ -240,8 +240,8 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                 value={options.layout}
                 onChange={(v) => setOption({ layout: v as SampleOptions["layout"] })}
                 options={[
-                  ["boxed", "Boxed 16:9 in frame"],
-                  ["full", "Full 9:16"],
+                  ["full", "Full 9:16, like a phone video"],
+                  ["boxed", "Boxed 16:9 in a dark frame"],
                 ]}
               />
               <Select
