@@ -7,8 +7,8 @@ can send it back and learn whether they would pay for it.
 ## Goal and scope
 
 - Input: one submission folder `studio/{uid}/{submissionId}/` holding
-  `recording.{mp4,webm}` (about 90 s, 1920×1080 webcam, the person reading a
-  fixed script after a head turn) and `request.json` (topic, name, firm,
+  `recording.{mp4,webm}` (about 90 s, vertical 9:16 — a phone upright or the
+  middle column of a laptop webcam — the person reading a fixed script) and `request.json` (topic, name, firm,
   consent).
 - Output: `final.mp4`, 1080×1920, 22–28 s, the person speaking that week's
   real IRCC news in the chosen topic area, with karaoke captions, fact cards,
@@ -104,7 +104,7 @@ type SampleStatus = {
     layout: "boxed" | "full"                // full (default) = 9:16 like a phone video, boxed = 16:9 clip in a frame
     mood: "calm" | "energetic"
     faceFrame?: number                      // 1–5
-    clipStart?: number                      // A: seconds into the recording, default 15
+    clipStart?: number                      // A: seconds into the recording, default 2 (recordings start at the script)
   }
   voiceId?: string
   stages: Record<Stage, {
@@ -176,13 +176,13 @@ Generate on, each new status starts the next step.
 
 ### 1. Prep (ffmpeg)
 
-- `ffmpeg -i recording -ss 15 -t 60 -vn -ac 1 -ar 44100 voice-sample.wav` —
-  skips the head turn and the first line, keeps one minute of reading.
+- `ffmpeg -i recording -ss 2 -t 60 -vn -ac 1 -ar 44100 voice-sample.wav` —
+  skips the first beat, keeps one minute of reading.
 - Frames: `-ss {t} -frames:v 1 -q:v 2 face-N.jpg` at 30/45/60/75/90 % of the
   duration. The admin picks the one with the best light and a closed mouth.
 - Method A clip is made at video start, not here, because it depends on the
   speech length: `-ss {clipStart} -t {ceil(speechSeconds)+1}`; for `layout:
-  full` also `-vf crop=608:1080:656:0,scale=1080:1920`.
+  full` also `-vf scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920` (cover-fit, a no-op crop for a 9:16 source).
 
 ### 2. Script
 

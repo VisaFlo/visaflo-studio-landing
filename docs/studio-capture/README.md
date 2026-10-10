@@ -15,11 +15,14 @@ and request a sample video.
 - **Name**: read from the person's own `users/{uid}` document in the
   `ca-dryrun` database (the Firestore rules already allow that read). The firm
   name is asked once and kept in the browser.
-- **Recording**: one MediaRecorder clip from the start of the head turn to the
-  end of the script (MP4 on Safari and new Chrome, WebM elsewhere). MediaPipe
-  Face Landmarker, loaded only on `/start`, runs the framing checks and fills
-  the ring as the head turns. If it can't load, the flow continues without
-  live checks.
+- **Recording**: one vertical (9:16) MediaRecorder clip of the script being
+  read (MP4 on Safari and new Chrome, WebM elsewhere). A phone held upright
+  records as is; a laptop webcam's 16:9 frame is cropped to its middle 9:16
+  column in the browser (`lib/studio/portrait.ts`), and the preview shows
+  exactly that crop. MediaPipe Face Landmarker, loaded only on `/start`,
+  runs the framing checks (face in the oval, distance, light) and starts the
+  recording on a countdown; there is no head-turn step. If it can't load, the
+  flow continues without live checks.
 - **Files**: uploaded straight from the browser to
   `gs://devdashboard-c9159-ca/studio/{uid}/{submissionId}/`:
   `recording.{mp4,webm}` and `request.json` (topic, name, firm, consent text

@@ -2,6 +2,8 @@
 
 import type { FaceLandmarker } from "@mediapipe/tasks-vision"
 
+import { portraitCrop } from "@/lib/studio/portrait"
+
 // MediaPipe Face Landmarker, loaded on demand so the landing page never pays
 // for it. The WASM runtime is pinned to the installed package version.
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm"
@@ -32,15 +34,15 @@ export function loadFaceLandmarker(): Promise<FaceLandmarker> {
   return loading
 }
 
-// One reading of the face, in the coordinates of the square, mirrored
-// preview the person sees (0..1, origin top left).
+// One reading of the face, in the coordinates of the vertical, mirrored
+// preview the person sees (0..1 of its width and height, origin top left).
 export type FaceFrame =
   | { found: false }
   | {
       found: true
       cx: number
       cy: number
-      /** Face width as a share of the preview's side. */
+      /** Face width as a share of the preview's width. */
       size: number
       /** Nose offset from the face's center, + is toward the preview's right. */
       yaw: number
@@ -78,9 +80,9 @@ export function readFace(landmarker: FaceLandmarker, video: HTMLVideoElement, at
 
   const vw = video.videoWidth
   const vh = video.videoHeight
-  const side = Math.min(vw, vh)
-  const ox = (vw - side) / 2
-  const oy = (vh - side) / 2
+  // The preview is the portrait crop of the camera (the whole frame when the
+  // camera is already portrait), so positions are measured within it.
+  const crop = portraitCrop(vw, vh)
 
   let minX = Infinity
   let maxX = -Infinity
@@ -102,41 +104,27 @@ export function readFace(landmarker: FaceLandmarker, video: HTMLVideoElement, at
   return {
     found: true,
     // The preview is mirrored, so x flips.
-    cx: 1 - ((minX + maxX) / 2 - ox) / side,
-    cy: ((minY + maxY) / 2 - oy) / side,
-    size: (maxX - minX) / side,
+    cx: 1 - ((minX + maxX) / 2 - crop.x) / crop.w,
+    cy: ((minY + maxY) / 2 - crop.y) / crop.h,
+    size: (maxX - minX) / crop.w,
     yaw: -(nose.x * vw - midX) / width,
     pitch: (nose.y * vh - midY) / height,
     light: faceBrightness(video, minX, minY, maxX - minX, maxY - minY),
   }
 }
 
-export type AlignCheck = { inCircle: boolean; distance: "ok" | "closer" | "back"; light: boolean }
+export type AlignCheck = { inFrame: boolean; distance: "ok" | "closer" | "back"; light: boolean }
+
+// Where the face should sit in the vertical frame: centred, a little above
+// the middle (like a phone selfie), filling roughly a third to a half of the
+// width.
+export const GUIDE = { cx: 0.5, cy: 0.4, tolerance: 0.14, minSize: 0.3, maxSize: 0.62 }
 
 export function checkAlignment(frame: FaceFrame): AlignCheck | null {
   if (!frame.found) return null
   return {
-    inCircle: Math.hypot(frame.cx - 0.5, frame.cy - 0.5) < 0.12,
-    distance: frame.size < 0.38 ? "closer" : frame.size > 0.8 ? "back" : "ok",
+    inFrame: Math.abs(frame.cx - GUIDE.cx) < GUIDE.tolerance && Math.abs(frame.cy - GUIDE.cy) < GUIDE.tolerance,
+    distance: frame.size < GUIDE.minSize ? "closer" : frame.size > GUIDE.maxSize ? "back" : "ok",
     light: frame.light >= 70,
   }
-}
-
-export const RING_TICKS = 90
-
-// Which ring ticks a head pose points at. Tick 0 is at the top and they run
-// clockwise, matching the ring. Small offsets (looking straight on) mark
-// nothing, so the ring only fills as the head actually turns.
-export function ticksForPose(yaw: number, pitch: number): number[] {
-  const dx = yaw
-  // Tilting up moves the nose less than tilting down (the forehead
-  // foreshortens), so upward pitch gets a bigger boost.
-  const dy = pitch * (pitch < 0 ? 2.6 : 1.6)
-  if (Math.hypot(dx, dy) < 0.07) return []
-  const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 90 + 360) % 360
-  const center = Math.round(deg / (360 / RING_TICKS))
-  const spread = 3
-  const ticks: number[] = []
-  for (let i = -spread; i <= spread; i++) ticks.push((center + i + RING_TICKS) % RING_TICKS)
-  return ticks
 }

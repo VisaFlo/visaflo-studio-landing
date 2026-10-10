@@ -46,9 +46,12 @@ export async function probeSeconds(file: string): Promise<number> {
 
 // A full recording is ~90 s: skip the head turn and first line (15 s) and
 // keep a minute. Shorter files keep the same proportion.
+// A minute of reading, skipping the first beat (settling in, the intro
+// line starting). Recordings begin at the script now; older ones with the
+// head turn at the start need the clip start moved by hand.
 export function voiceWindow(duration: number): { start: number; seconds: number } {
-  if (duration >= 75) return { start: 15, seconds: 60 }
-  const start = Math.round(Math.min(15, duration * 0.15) * 10) / 10
+  if (duration >= 62) return { start: 2, seconds: 60 }
+  const start = Math.round(Math.min(2, duration * 0.15) * 10) / 10
   return { start, seconds: Math.round((duration - start) * 10) / 10 }
 }
 
@@ -66,9 +69,10 @@ export async function extractFrame(input: string, out: string, at: number): Prom
 }
 
 // Method A: the part of the recording that will carry the new speech. crop
-// turns 16:9 into a centred 9:16 column scaled to 1080×1920.
+// fits any aspect to 1080×1920 the way object-fit: cover would (a 16:9
+// webcam clip keeps its middle column; a phone's 9:16 just scales).
 export async function cutClip(input: string, out: string, opts: { start: number; seconds: number; crop: boolean }): Promise<void> {
-  const filters = opts.crop ? ["-vf", "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920"] : []
+  const filters = opts.crop ? ["-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"] : []
   await ffmpeg([
     "-ss", String(opts.start), "-t", String(opts.seconds), "-i", input,
     ...filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out,

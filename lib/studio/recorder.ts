@@ -29,8 +29,10 @@ export type Recording = {
   seconds: number
   source: "camera" | "upload"
   /** Camera recordings only: what the live checks saw. */
-  checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn: boolean }
+  checks?: RecordingChecks
 }
+
+export type RecordingChecks = { faceSeen: boolean; voiceHeard: boolean }
 
 export type ActiveRecorder = {
   stop: () => Promise<{ blob: Blob; mime: string; seconds: number; voiceHeard: boolean }>

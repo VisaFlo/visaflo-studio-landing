@@ -3,17 +3,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Camera, CameraOff, Mic, Play, Square, Sun, TriangleAlert } from "lucide-react"
 
-import { CameraVideo, FaceRing } from "@/components/studio/face-ring"
+import { CameraVideo, PortraitFrame } from "@/components/studio/camera-frame"
 import { DoneMark, FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
 import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
-import { checkAlignment, RING_TICKS, ticksForPose, type AlignCheck } from "@/lib/studio/face-tracker"
+import { checkAlignment, type AlignCheck } from "@/lib/studio/face-tracker"
 import type { Recording } from "@/lib/studio/recorder"
 import { startRecognizer, speechRecognitionSupported } from "@/lib/studio/speech-recognizer"
 import { useFaceFrames } from "@/lib/studio/use-face-frames"
 import { advancePointer, indexScript, lineOfWord, tokenize } from "@/lib/studio/word-follow"
 import { cn } from "@/lib/utils"
-
-export type Pose = { yaw: number; pitch: number }
 
 // Camera steps: the preview takes the big left area on desktop and sits
 // between the title and the controls on a phone.
@@ -27,12 +25,12 @@ function StageLayout({ title, stage, children }: { title: ReactNode; stage: Reac
   )
 }
 
-const CAPTURE_STEPS = ["Fit your face", "Turn your head", "Read the script"]
+const CAPTURE_STEPS = ["Fit your face", "Read the script"]
 
-// The three parts of the recording, named, so it's clear what comes next.
+// The two parts of the recording, named, so it's clear what comes next.
 export function CaptureStepper({ current, progress = 0 }: { current: number; progress?: number }) {
   return (
-    <ol className="m-0 grid list-none grid-cols-3 gap-1 p-0" aria-label="Recording steps">
+    <ol className="m-0 grid list-none grid-cols-2 gap-1 p-0" aria-label="Recording steps">
       {CAPTURE_STEPS.map((label, i) => (
         <li key={label} aria-current={i === current ? "step" : undefined} className="flex flex-col gap-2">
           <span className="relative h-1 overflow-hidden bg-stone-200">
@@ -56,9 +54,9 @@ export function CaptureStepper({ current, progress = 0 }: { current: number; pro
   )
 }
 
-function RingStage({ children }: { children: ReactNode }) {
+function PreviewStage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[560px]">{children}</div>
+    <div className="flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[620px]">{children}</div>
   )
 }
 
@@ -86,7 +84,7 @@ export function CameraAllowStep({
         </>
       }
       stage={
-        <div className="flex aspect-[16/10] max-h-[560px] w-full items-center justify-center gap-6 border-[1.5px] border-dashed border-stone-400 bg-stone-50">
+        <div className="flex aspect-[9/16] h-[min(560px,60vh)] flex-col items-center justify-center gap-6 rounded-[28px] border-[1.5px] border-dashed border-stone-400 bg-stone-50">
           <Camera className="size-12 text-stone-600" strokeWidth={1.3} />
           <Mic className="size-11 text-stone-600" strokeWidth={1.3} />
         </div>
@@ -172,7 +170,7 @@ export function CameraBlockedStep({ onRetry }: { onRetry: () => void }) {
         </>
       }
       stage={
-        <div className="flex aspect-[16/10] max-h-[560px] w-full items-center justify-center border border-stone-200 bg-stone-100">
+        <div className="flex aspect-[9/16] h-[min(560px,60vh)] items-center justify-center rounded-[28px] border border-stone-200 bg-stone-100">
           <CameraOff className="size-14 text-stone-400" strokeWidth={1.3} />
         </div>
       }
@@ -212,12 +210,12 @@ function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint
 
 const COUNTDOWN_SECONDS = 3
 
-export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (baseline: Pose) => void }) {
+export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (result: { faceSeen: boolean }) => void }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [canSkip, setCanSkip] = useState(false)
-  const poses = useRef<Pose[]>([])
+  const faceSeen = useRef(false)
   const allOkSince = useRef<number | null>(null)
   const faceOkSince = useRef<number | null>(null)
   const readySince = useRef<number | null>(null)
@@ -229,11 +227,8 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
     const result = checkAlignment(frame)
     setCheck(result)
     const now = performance.now()
-    if (frame.found) {
-      poses.current.push({ yaw: frame.yaw, pitch: frame.pitch })
-      if (poses.current.length > 15) poses.current.shift()
-    }
-    const faceOk = Boolean(result?.inCircle && result.distance === "ok")
+    if (frame.found) faceSeen.current = true
+    const faceOk = Boolean(result?.inFrame && result.distance === "ok")
     faceOkSince.current = faceOk ? (faceOkSince.current ?? now) : null
     allOkSince.current = faceOk && result?.light ? (allOkSince.current ?? now) : null
     // A dim room shouldn't stop anyone: after 8 seconds framed well, light
@@ -264,19 +259,13 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
 
   const unavailable = status === "unavailable"
   const live = status === "ready"
-  const aligned = Boolean(check?.inCircle && check.distance === "ok")
+  const aligned = Boolean(check?.inFrame && check.distance === "ok")
 
   function start() {
     if (started.current) return
     started.current = true
-    const list = poses.current
-    const baseline = list.length
-      ? {
-          yaw: list.reduce((s, p) => s + p.yaw, 0) / list.length,
-          pitch: list.reduce((s, p) => s + p.pitch, 0) / list.length,
-        }
-      : { yaw: 0, pitch: 0 }
-    onStart(baseline)
+    // Without live tracking there's no reading to hold against them.
+    onStart({ faceSeen: faceSeen.current || status !== "ready" })
   }
 
   useEffect(() => {
@@ -288,17 +277,17 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       title={
         <>
           <CaptureStepper current={0} />
-          <FlowTitle>Fit your face in the circle</FlowTitle>
+          <FlowTitle>Fit your face in the oval</FlowTitle>
           <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
             {unavailable
-              ? "Sit about an arm's length away, facing a window or lamp. Press the button when you're centered."
-              : "Sit about an arm's length away. When all three are checked, the head turn starts on its own."}
+              ? "This vertical frame is what your video will use. Hold your phone upright, or sit an arm's length from your laptop, facing a window or lamp. Press the button when you're in the oval."
+              : "This vertical frame is what your video will use. Sit an arm's length away. When all three are checked, recording starts on its own."}
           </p>
         </>
       }
       stage={
-        <RingStage>
-          <FaceRing stream={stream} onVideo={setVideo} dim={live && !aligned && countdown === null}>
+        <PreviewStage>
+          <PortraitFrame stream={stream} onVideo={setVideo} dim={live && !aligned && countdown === null}>
             {countdown !== null && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white" aria-hidden>
                 <span className="font-serif text-[96px] leading-none font-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]">
@@ -307,13 +296,13 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
                 <span className="bg-stone-950/60 px-3 py-1 text-[14px]">Hold still</span>
               </div>
             )}
-          </FaceRing>
-        </RingStage>
+          </PortraitFrame>
+        </PreviewStage>
       }
     >
       {!unavailable && (
         <ul className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
-          <CheckRow label="Face in circle" ok={live ? Boolean(check?.inCircle) : null} hint="Center your face" />
+          <CheckRow label="Face in the oval" ok={live ? Boolean(check?.inFrame) : null} hint="Center your face" />
           <CheckRow
             label="Distance"
             ok={live ? check?.distance === "ok" : null}
@@ -333,7 +322,7 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       )}
       <p role="status" className="m-0 text-[14px] text-stone-600">
         {countdown !== null
-          ? `Starting the head turn in ${countdown}…`
+          ? `Recording starts in ${countdown}…`
           : live
             ? aligned
               ? "Almost there. Find a bit more light."
@@ -346,7 +335,7 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
         <div className="flex flex-col gap-2">
           {unavailable ? (
             <PrimaryButton type="button" onClick={start}>
-              I&apos;m centered, start
+              I&apos;m in the oval, start
             </PrimaryButton>
           ) : (
             <QuietButton type="button" onClick={start}>
@@ -355,129 +344,6 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
           )}
         </div>
       )}
-    </StageLayout>
-  )
-}
-
-export function TurnStep({
-  stream,
-  baseline,
-  onDone,
-  onStartOver,
-}: {
-  stream: MediaStream
-  baseline: Pose
-  onDone: (result: { headTurn: boolean; faceSeen: boolean }) => void
-  onStartOver: () => void
-}) {
-  const [video, setVideo] = useState<HTMLVideoElement | null>(null)
-  const [ticks, setTicks] = useState<Set<number>>(() => new Set())
-  const [canSkip, setCanSkip] = useState(false)
-  const faceSeen = useRef(false)
-  const doneRef = useRef(onDone)
-  useEffect(() => {
-    doneRef.current = onDone
-  })
-
-  const status = useFaceFrames(video, (frame) => {
-    if (!frame.found) return
-    faceSeen.current = true
-    const hit = ticksForPose(frame.yaw - baseline.yaw, frame.pitch - baseline.pitch)
-    if (!hit.length) return
-    setTicks((prev) => {
-      if (hit.every((t) => prev.has(t))) return prev
-      const next = new Set(prev)
-      hit.forEach((t) => next.add(t))
-      return next
-    })
-  })
-
-  // Without live tracking, fill the ring over 12 seconds so the person still
-  // has a pace to follow; the recording captures the turn either way.
-  useEffect(() => {
-    if (status !== "unavailable") return
-    const start = performance.now()
-    const id = window.setInterval(() => {
-      const n = Math.min(RING_TICKS, Math.round(((performance.now() - start) / 12_000) * RING_TICKS))
-      setTicks(new Set(Array.from({ length: n }, (_, i) => i)))
-    }, 100)
-    return () => window.clearInterval(id)
-  }, [status])
-
-  // If tracking struggles (glasses, odd light), let them move on after 30s.
-  useEffect(() => {
-    const id = window.setTimeout(() => setCanSkip(true), 30_000)
-    return () => window.clearTimeout(id)
-  }, [])
-
-  const progress = ticks.size / RING_TICKS
-  const complete = progress >= 0.8
-
-  // Full ring: show the success state for a beat, then go to the script.
-  useEffect(() => {
-    if (!complete) return
-    const id = window.setTimeout(
-      () => doneRef.current({ headTurn: true, faceSeen: faceSeen.current || status !== "ready" }),
-      1200,
-    )
-    return () => window.clearTimeout(id)
-  }, [complete, status])
-
-  return (
-    <StageLayout
-      title={
-        <>
-          <CaptureStepper current={1} progress={progress} />
-          <FlowTitle>{complete ? "Got it" : "Slowly turn your head in a circle"}</FlowTitle>
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            {complete
-              ? "Next, read a short script out loud."
-              : "Like drawing a circle with your nose. Follow the dot and fill the whole ring."}
-          </p>
-        </>
-      }
-      stage={
-        <RingStage>
-          <FaceRing stream={stream} onVideo={setVideo} done={ticks}>
-            {!complete && (
-              <div className="pointer-events-none absolute inset-0 animate-spin [animation-duration:7s]" aria-hidden>
-                <span className="absolute top-[1.2%] left-1/2 size-4 -translate-x-1/2 rounded-full bg-[#4d5a48] ring-4 ring-white" />
-              </div>
-            )}
-            <span className="absolute top-[9%] left-1/2 flex h-7 -translate-x-1/2 items-center gap-2 bg-stone-950/72 px-2.5 font-mono text-[12px] text-white">
-              <span className="size-2 animate-pulse rounded-full bg-red-500" />
-              Recording
-            </span>
-            {complete && (
-              <span className="absolute inset-0 flex items-center justify-center" aria-hidden>
-                <span className="flex size-20 items-center justify-center rounded-full bg-white/92">
-                  <DoneMark className="size-10" />
-                </span>
-              </span>
-            )}
-          </FaceRing>
-        </RingStage>
-      }
-    >
-      <div className="flex items-baseline gap-3">
-        <p role="status" className="m-0 font-mono text-[24px]">
-          {Math.round(progress * 100)}%
-        </p>
-        <span className="text-[14px] text-stone-600">{complete ? "Done" : "of the ring filled"}</span>
-      </div>
-      <div className="flex flex-col gap-2">
-        {canSkip && !complete && (
-          <PrimaryButton
-            type="button"
-            onClick={() => onDone({ headTurn: false, faceSeen: faceSeen.current || status !== "ready" })}
-          >
-            Skip to the script
-          </PrimaryButton>
-        )}
-        <QuietButton type="button" onClick={onStartOver}>
-          Start over
-        </QuietButton>
-      </div>
     </StageLayout>
   )
 }
@@ -716,7 +582,7 @@ export function ScriptStep({
 
   return (
     <main className="mx-auto flex w-full max-w-[960px] flex-grow flex-col gap-6 px-(--page-pad) py-6 sm:gap-8 sm:py-10">
-      <CaptureStepper current={2} progress={(line + 1) / lines.length} />
+      <CaptureStepper current={1} progress={(line + 1) / lines.length} />
       <div className="order-2 flex flex-col gap-5 sm:order-1">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[14px] text-stone-600">
           <span className="flex items-center gap-2">
@@ -762,7 +628,7 @@ export function ScriptStep({
         </p>
       </div>
       <div className="order-1 flex flex-wrap items-center justify-between gap-4 border-stone-200 sm:order-2 sm:mt-auto sm:gap-6 sm:border-t sm:pt-6">
-        <div className="relative aspect-[16/10] w-[min(240px,40vw)] overflow-hidden bg-stone-700 sm:w-[288px]">
+        <div className="relative aspect-[9/16] h-[min(220px,32vh)] overflow-hidden rounded-xl bg-stone-700">
           <CameraVideo stream={stream} className="size-full object-cover" />
           <span className="absolute top-2 left-2 flex h-6 items-center gap-2 bg-stone-950/72 px-2 font-mono text-[12px] text-white">
             <span className="size-2 animate-pulse rounded-full bg-red-500" />
@@ -826,11 +692,11 @@ export function ReviewStep({
   const [playing, setPlaying] = useState(false)
   const checks = recording.checks
   const short = recording.source === "camera" && recording.seconds < 45
-  const allGood = !checks || (checks.faceSeen && checks.voiceHeard && checks.headTurn && !short)
+  const allGood = !checks || (checks.faceSeen && checks.voiceHeard && !short)
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
-      <div className="relative aspect-[16/10] max-h-[560px] min-w-0 flex-[999_1_560px] overflow-hidden bg-stone-700">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
+      <div className="relative aspect-[9/16] h-[min(640px,70vh)] shrink-0 overflow-hidden rounded-[28px] bg-stone-700">
         <video
           ref={player}
           src={recording.url}
@@ -867,7 +733,6 @@ export function ReviewStep({
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
             <Chip ok={checks.faceSeen}>{checks.faceSeen ? "Face clear" : "Face not seen"}</Chip>
             <Chip ok={checks.voiceHeard}>{checks.voiceHeard ? "Voice clear" : "No voice heard"}</Chip>
-            <Chip ok={checks.headTurn}>{checks.headTurn ? "Head turn" : "Head turn skipped"}</Chip>
             {short && <Chip ok={false}>Short. Aim for a minute</Chip>}
           </ul>
         ) : notice ? null : (

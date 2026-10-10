@@ -23,8 +23,8 @@ beforeAll(async () => {
 }, 60_000)
 
 describe("windows", () => {
-  it("skips the head turn on a full recording", () => {
-    expect(voiceWindow(90)).toEqual({ start: 15, seconds: 60 })
+  it("skips the first beat of a full recording and keeps a minute", () => {
+    expect(voiceWindow(90)).toEqual({ start: 2, seconds: 60 })
   })
   it("clamps to a short recording", () => {
     expect(voiceWindow(8)).toEqual({ start: 1.2, seconds: 6.8 })

@@ -86,9 +86,7 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
   const s = load.submission
   const title = [s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.uid
   const flags = s.checks
-    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard", !s.checks.headTurn && "Head turn skipped"].filter(
-        (f): f is string => Boolean(f),
-      )
+    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard"].filter((f): f is string => Boolean(f))
     : []
   const rows: [string, string][] = [
     ["Email", s.email ?? "—"],

@@ -83,7 +83,7 @@ export const TIMEOUT_MINUTES: Record<Stage, number> = {
 export function defaultStatus(): SampleStatus {
   return {
     version: 1,
-    options: { method: "real", background: "office", layout: "full", mood: "calm", lipsync: "pro", clipStart: 15 },
+    options: { method: "real", background: "office", layout: "full", mood: "calm", lipsync: "pro", clipStart: 2 },
     assets: {},
     stages: Object.fromEntries(STAGES.map((s) => [s, { state: "idle" }])) as Record<Stage, StageState>,
   }

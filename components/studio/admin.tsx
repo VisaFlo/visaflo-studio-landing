@@ -102,9 +102,7 @@ function SubmissionTable({ submissions }: { submissions: Submission[] }) {
 
 function SubmissionRow({ submission: s }: { submission: Submission }) {
   const flags = s.checks
-    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard", !s.checks.headTurn && "Head turn skipped"].filter(
-        (f): f is string => Boolean(f),
-      )
+    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard"].filter((f): f is string => Boolean(f))
     : []
   const href = submissionHref(s.id)
   return (

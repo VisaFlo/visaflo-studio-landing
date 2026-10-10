@@ -21,7 +21,8 @@ export type Submission = {
   firm?: string
   topicTitle?: string
   seconds?: number
-  checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn: boolean }
+  /** headTurn only on submissions from before the head-turn step was dropped. */
+  checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn?: boolean }
   consent?: string
   consentAt?: string
   video?: { url: string; contentType: string; bytes: number }
