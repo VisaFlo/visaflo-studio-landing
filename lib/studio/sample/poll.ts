@@ -1,16 +1,30 @@
-import type { SampleRef } from "@/lib/studio/sample/context"
-import { videoCost } from "@/lib/studio/sample/costs"
+import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
+import { PRICES, videoCost } from "@/lib/studio/sample/costs"
 import { LIPSYNC_MODELS, pollFal, submitFal, type JobPoll } from "@/lib/studio/sample/fal"
 import { pollHiggsfield } from "@/lib/studio/sample/higgsfield"
+import { pollLambdaRender } from "@/lib/studio/sample/render"
 import { clipSeconds, copyToSample } from "@/lib/studio/sample/stages"
 import { failStage, finishStage, setJob, STAGES, timedOut, type SampleStatus, type Stage, type StageJob } from "@/lib/studio/sample/status"
+import { mediaUrl, storageExists, storageMeta } from "@/lib/studio/storage"
 
 export type PollContext = { token: string; ref: SampleRef; status: SampleStatus; now?: Date }
 
-async function askProvider(job: StageJob): Promise<JobPoll> {
+// A local render (npm run sample:render) is "done" once final.mp4 lands in
+// the folder with a download token.
+async function localFinal(token: string, ref: SampleRef): Promise<string | null> {
+  const name = sampleFile(ref, "final.mp4")
+  if (!(await storageExists(token, name))) return null
+  const meta = await storageMeta(token, name)
+  const downloadToken = meta.downloadTokens?.split(",")[0]
+  return downloadToken ? mediaUrl(name, downloadToken) : null
+}
+
+async function askProvider(ctx: PollContext, job: StageJob): Promise<JobPoll> {
   if (job.provider === "fal") return pollFal(job)
   if (job.provider === "higgsfield") return pollHiggsfield(job)
-  return { state: "failed", error: `No poller for ${job.provider}` }
+  if (job.provider === "remotion") return pollLambdaRender(job)
+  const url = await localFinal(ctx.token, ctx.ref)
+  return url ? { state: "done", videoUrl: url } : { state: "running" }
 }
 
 async function finishVideo(ctx: PollContext, job: StageJob, videoUrl: string): Promise<SampleStatus> {
@@ -30,6 +44,12 @@ async function finishVideo(ctx: PollContext, job: StageJob, videoUrl: string): P
   })
 }
 
+async function finishRender(ctx: PollContext, job: StageJob, videoUrl: string): Promise<SampleStatus> {
+  const local = job.provider === "local"
+  const finalUrl = local ? videoUrl : await copyToSample(ctx.token, ctx.ref, videoUrl, "final.mp4", "video/mp4")
+  return finishStage(ctx.status, "render", { cost: local ? 0 : PRICES.lambdaRender, assets: { "final.mp4": finalUrl } })
+}
+
 // Called every few seconds by the admin page while something is running.
 export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
   const { status } = ctx
@@ -41,7 +61,7 @@ export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
 
   let result: JobPoll
   try {
-    result = await askProvider(state.job!)
+    result = await askProvider(ctx, state.job!)
   } catch (error) {
     return failStage(status, stage, error instanceof Error ? error.message : String(error), now)
   }
@@ -49,6 +69,7 @@ export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
   if (result.state === "failed") return failStage(status, stage, result.error, now)
   try {
     if (stage === "video") return await finishVideo(ctx, state.job!, result.videoUrl)
+    if (stage === "render") return await finishRender(ctx, state.job!, result.videoUrl)
     return failStage(status, stage, `No finisher for ${stage}`, now)
   } catch (error) {
     return failStage(status, stage, error instanceof Error ? error.message : String(error), now)

@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as fal from "@/lib/studio/sample/fal"
 import * as higgsfield from "@/lib/studio/sample/higgsfield"
 import { pollJob } from "@/lib/studio/sample/poll"
+import * as render from "@/lib/studio/sample/render"
 import * as stages from "@/lib/studio/sample/stages"
 import { defaultStatus, setJob, startStage } from "@/lib/studio/sample/status"
+import * as storage from "@/lib/studio/storage"
 
 const ref = { uid: "u", submissionId: "s", folder: "studio/u/s", sampleFolder: "studio/u/s/sample" }
 const falJob = { provider: "fal" as const, id: "r", statusUrl: "s", responseUrl: "r", step: "lipsync" as const }
@@ -69,5 +71,29 @@ describe("pollJob", () => {
   it("does nothing when nothing is running", async () => {
     const status = defaultStatus()
     expect(await pollJob({ token: "t", ref, status })).toEqual(status)
+  })
+
+  it("finishes a local render once final.mp4 is in the folder", async () => {
+    vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    const status = setJob(startStage(defaultStatus(), "render"), "render", { provider: "local", id: "render-props.json" })
+    expect((await pollJob({ token: "t", ref, status })).stages.render.state).toBe("running")
+
+    vi.spyOn(storage, "storageExists").mockResolvedValue(true)
+    vi.spyOn(storage, "storageMeta").mockResolvedValue({ name: "studio/u/s/sample/final.mp4", downloadTokens: "tok" })
+    const next = await pollJob({ token: "t", ref, status })
+    expect(next.stages.render.state).toBe("done")
+    expect(next.assets["final.mp4"]).toContain("final.mp4?alt=media&token=tok")
+    expect(next.stages.render.cost).toBe(0)
+  })
+
+  it("copies a finished Lambda render into final.mp4", async () => {
+    vi.spyOn(render, "pollLambdaRender").mockResolvedValue({ state: "done", videoUrl: "https://s3/out.mp4" })
+    const copy = vi.spyOn(stages, "copyToSample").mockResolvedValue("https://bucket/final.mp4")
+    const status = setJob(startStage(defaultStatus(), "render"), "render", { provider: "remotion", id: "rid", bucketName: "b" })
+    const next = await pollJob({ token: "t", ref, status })
+    expect(copy).toHaveBeenCalledWith("t", ref, "https://s3/out.mp4", "final.mp4", "video/mp4")
+    expect(next.stages.render.state).toBe("done")
+    expect(next.assets["final.mp4"]).toBe("https://bucket/final.mp4")
+    expect(next.stages.render.cost).toBeCloseTo(0.02, 2)
   })
 })

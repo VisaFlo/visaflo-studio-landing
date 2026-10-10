@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest"
+
+import { renderProps } from "@/lib/studio/sample/render"
+import { defaultStatus } from "@/lib/studio/sample/status"
+
+describe("renderProps", () => {
+  it("collects every asset url and the script parts the composition needs", () => {
+    const status = {
+      ...defaultStatus(),
+      speechSeconds: 24.5,
+      assets: {
+        "talking.mp4": "t",
+        "speech.mp3": "s",
+        "music.mp3": "m",
+        "sfx-whoosh.mp3": "w",
+        "sfx-pop.mp3": "p",
+      },
+    }
+    const script = { headline: "H", cards: [{ line: 0, label: "L", value: "V", sub: null }] } as never
+    const words = [{ word: "a", start: 0, end: 0.3, line: 0 }]
+    expect(renderProps(status, script, words)).toEqual({
+      talkingUrl: "t",
+      speechUrl: "s",
+      musicUrl: "m",
+      sfxWhooshUrl: "w",
+      sfxPopUrl: "p",
+      words,
+      cards: [{ line: 0, label: "L", value: "V", sub: null }],
+      layout: "boxed",
+      headline: "H",
+      speechSeconds: 24.5,
+    })
+  })
+  it("refuses when an asset is missing", () => {
+    expect(() => renderProps({ ...defaultStatus(), speechSeconds: 20 }, { headline: "H", cards: [] } as never, [])).toThrow(/talking\.mp4/)
+  })
+})

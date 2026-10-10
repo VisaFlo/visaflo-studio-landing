@@ -9,10 +9,11 @@ import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/
 import { cutClip, downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
 import { submitSeedance } from "@/lib/studio/sample/higgsfield"
 import { MUSIC_PROMPT, OMNIHUMAN_PROMPT, scenePrompt, SFX } from "@/lib/studio/sample/prompts"
+import { lambdaConfigured, renderProps, startLambdaRender } from "@/lib/studio/sample/render"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
 import { templateFor, templateId } from "@/lib/studio/sample/scripts"
 import type { SampleStatus, Stage, StageJob, StagePatch } from "@/lib/studio/sample/status"
-import { wordsFromAlignment } from "@/lib/studio/sample/words"
+import { wordsFromAlignment, type Word } from "@/lib/studio/sample/words"
 import { listObjects, mediaUrl, storageBytes, storageGet, storageJson, storageMeta, storageUpload, StorageError } from "@/lib/studio/storage"
 
 export type StageOutcome = { done: true; cost?: number; patch?: StagePatch } | { done: false; job: StageJob }
@@ -187,4 +188,15 @@ const audio: StageWork = async ({ token, ref, status }) => {
   return { done: true, cost: audioCost(status.speechSeconds), patch: { assets } }
 }
 
-export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video, audio }
+// Remotion Lambda when configured; otherwise leave the props for
+// `npm run sample:render`, which uploads final.mp4 for the poller to find.
+const render: StageWork = async ({ token, ref, status }) => {
+  const file = await storageJson<ScriptFile>(token, sampleFile(ref, "script.json"))
+  const words = await storageJson<Word[]>(token, sampleFile(ref, "words.json"))
+  const props = renderProps(status, file.draft, words)
+  if (lambdaConfigured()) return { done: false, job: await startLambdaRender(props) }
+  await uploadAsset(token, ref, "render-props.json", JSON.stringify(props), "application/json")
+  return { done: false, job: { provider: "local", id: "render-props.json" } }
+}
+
+export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video, audio, render }
