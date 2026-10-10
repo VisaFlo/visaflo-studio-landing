@@ -1,4 +1,4 @@
-import type { JobPoll } from "@/lib/studio/sample/fal"
+import { fetchOrBlip, type JobPoll } from "@/lib/studio/sample/fal"
 import type { StageJob } from "@/lib/studio/sample/status"
 
 function headers(): Record<string, string> {
@@ -32,7 +32,8 @@ export async function submitSeedance(input: { imageUrl: string; audioUrl: string
 
 export async function pollHiggsfield(job: StageJob): Promise<JobPoll> {
   if (!job.statusUrl) return { state: "failed", error: "Higgsfield job lost its status url" }
-  const response = await fetch(job.statusUrl, { headers: headers(), cache: "no-store" })
+  const response = await fetchOrBlip(job.statusUrl, { headers: headers(), cache: "no-store" })
+  if (response === "blip") return { state: "running" }
   if (!response.ok) return { state: "failed", error: `Higgsfield status ${response.status}: ${(await response.text()).slice(0, 200)}` }
   const body = (await response.json()) as { status: string; error?: string; video?: { url?: string } }
   const status = body.status.toLowerCase()

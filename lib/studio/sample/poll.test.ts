@@ -73,17 +73,31 @@ describe("pollJob", () => {
     expect(await pollJob({ token: "t", ref, status })).toEqual(status)
   })
 
-  it("finishes a local render once final.mp4 is in the folder", async () => {
+  it("finishes a local render once a final.mp4 newer than the run is in the folder", async () => {
     vi.spyOn(storage, "storageExists").mockResolvedValue(false)
-    const status = setJob(startStage(defaultStatus(), "render"), "render", { provider: "local", id: "render-props.json" })
-    expect((await pollJob({ token: "t", ref, status })).stages.render.state).toBe("running")
+    const started = new Date("2026-10-09T10:00:00Z")
+    const now = new Date("2026-10-09T10:06:00Z")
+    const status = setJob(startStage(defaultStatus(), "render", started), "render", { provider: "local", id: "render-props.json" })
+    expect((await pollJob({ token: "t", ref, status, now })).stages.render.state).toBe("running")
 
+    // A final.mp4 left over from an earlier run doesn't count.
     vi.spyOn(storage, "storageExists").mockResolvedValue(true)
-    vi.spyOn(storage, "storageMeta").mockResolvedValue({ name: "studio/u/s/sample/final.mp4", downloadTokens: "tok" })
-    const next = await pollJob({ token: "t", ref, status })
+    vi.spyOn(storage, "storageMeta").mockResolvedValue({ name: "studio/u/s/sample/final.mp4", downloadTokens: "old", timeCreated: "2026-10-09T09:00:00Z" })
+    expect((await pollJob({ token: "t", ref, status, now })).stages.render.state).toBe("running")
+
+    vi.spyOn(storage, "storageMeta").mockResolvedValue({ name: "studio/u/s/sample/final.mp4", downloadTokens: "tok", timeCreated: "2026-10-09T10:05:00Z" })
+    const next = await pollJob({ token: "t", ref, status, now })
     expect(next.stages.render.state).toBe("done")
     expect(next.assets["final.mp4"]).toContain("final.mp4?alt=media&token=tok")
     expect(next.stages.render.cost).toBe(0)
+  })
+
+  it("times out a stage left running with no job (the run died mid-way)", async () => {
+    const started = new Date("2026-10-09T10:00:00Z")
+    const status = startStage(defaultStatus(), "prep", started)
+    expect((await pollJob({ token: "t", ref, status, now: new Date("2026-10-09T10:03:00Z") })).stages.prep.state).toBe("running")
+    const next = await pollJob({ token: "t", ref, status, now: new Date("2026-10-09T10:06:00Z") })
+    expect(next.stages.prep).toMatchObject({ state: "failed", error: expect.stringContaining("timed out") })
   })
 
   it("copies a finished Lambda render into final.mp4", async () => {

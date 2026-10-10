@@ -42,6 +42,20 @@ describe("fal", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "FAILED", error: "bad audio" }), { status: 200 })))
     expect(await pollFal(job)).toMatchObject({ state: "failed" })
   })
+
+  it("treats a provider blip (5xx, 429, network) as still running", async () => {
+    process.env.FAL_KEY = "fk"
+    const job = { provider: "fal" as const, id: "r1", statusUrl: "https://q/s", responseUrl: "https://q/r" }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad gateway", { status: 502 })))
+    expect(await pollFal(job)).toEqual({ state: "running" })
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("slow down", { status: 429 })))
+    expect(await pollFal(job)).toEqual({ state: "running" })
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed") }))
+    expect(await pollFal(job)).toEqual({ state: "running" })
+    // A 4xx that isn't rate limiting is a real answer.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("gone", { status: 404 })))
+    expect(await pollFal(job)).toMatchObject({ state: "failed" })
+  })
 })
 
 describe("higgsfield", () => {
@@ -79,5 +93,9 @@ describe("higgsfield", () => {
     expect(await pollHiggsfield(job)).toEqual({ state: "done", videoUrl: "https://h/v.mp4" })
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "failed", error: "nsfw" }))))
     expect(await pollHiggsfield(job)).toMatchObject({ state: "failed" })
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("maintenance", { status: 503 })))
+    expect(await pollHiggsfield(job)).toEqual({ state: "running" })
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed") }))
+    expect(await pollHiggsfield(job)).toEqual({ state: "running" })
   })
 })

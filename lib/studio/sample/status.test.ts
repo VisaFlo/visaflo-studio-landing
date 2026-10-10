@@ -5,6 +5,8 @@ import {
   defaultStatus,
   failStage,
   finishStage,
+  markStale,
+  mergeStageResult,
   startStage,
   timedOut,
   type SampleStatus,
@@ -54,6 +56,25 @@ describe("startStage", () => {
     expect(again.scriptApproved).toBe(false)
   })
 
+  it("only stales stages that depend on the one re-run", () => {
+    const s = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice", "video", "audio", "render")
+    const prepAgain = startStage(s, "prep")
+    expect(prepAgain.stages.script.state).toBe("done") // Script doesn't use Prep's output
+    expect(prepAgain.stages.voice.state).toBe("stale")
+    expect(prepAgain.stages.render.state).toBe("stale")
+    const videoAgain = startStage(s, "video")
+    expect(videoAgain.stages.audio.state).toBe("done") // Audio only needs Voice
+    expect(videoAgain.stages.render.state).toBe("stale")
+  })
+
+  it("exposes staling on its own for script edits", () => {
+    const s = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice", "audio")
+    const edited = markStale(s, "voice")
+    expect(edited.stages.voice.state).toBe("stale")
+    expect(edited.stages.audio.state).toBe("stale")
+    expect(edited.stages.script.state).toBe("done")
+  })
+
   it("blocks video when voice is stale", () => {
     const s = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice")
     const again = finishStage(startStage(s, "script"), "script")
@@ -87,6 +108,29 @@ describe("finishStage / failStage", () => {
     const s = failStage(startStage(defaultStatus(), "prep"), "prep", "x".repeat(1000))
     expect(s.stages.prep.state).toBe("failed")
     expect(s.stages.prep.error!.length).toBeLessThanOrEqual(400)
+  })
+})
+
+describe("mergeStageResult", () => {
+  it("applies one stage's result onto a fresher status without undoing other stages", () => {
+    // What the run route read at the start, then finished Audio on.
+    const start = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice")
+    const ran = finishStage(startStage(start, "audio"), "audio", { cost: 0.3, assets: { "music.mp3": "m" } })
+    // Meanwhile the poller finished Video and added talking.mp4.
+    const fresh = finishStage(startStage(start, "video"), "video", { cost: 2, assets: { "talking.mp4": "t" } })
+    const merged = mergeStageResult(fresh, ran, "audio")
+    expect(merged.stages.video.state).toBe("done")
+    expect(merged.stages.audio).toMatchObject({ state: "done", cost: 0.3 })
+    expect(merged.assets).toEqual({ "talking.mp4": "t", "music.mp3": "m" })
+  })
+
+  it("carries the fields the stage produced and the staling it caused", () => {
+    const start = withDone({ ...defaultStatus(), scriptApproved: true }, "prep", "script", "voice", "audio")
+    const ran = finishStage(startStage(start, "voice"), "voice", { voiceId: "v2", speechSeconds: 21 })
+    const merged = mergeStageResult(start, ran, "voice")
+    expect(merged.voiceId).toBe("v2")
+    expect(merged.speechSeconds).toBe(21)
+    expect(merged.stages.audio.state).toBe("stale")
   })
 })
 

@@ -20,6 +20,8 @@ export const FPS = 30
 export const WIDTH = 1080
 export const HEIGHT = 1920
 export const TAIL_SECONDS = 1.5
+/** How long the headline strip shows; cards wait for it. */
+export const HEADLINE_SECONDS = 2.5
 
 export function durationInFrames(speechSeconds: number): number {
   return Math.ceil((speechSeconds + TAIL_SECONDS) * FPS)

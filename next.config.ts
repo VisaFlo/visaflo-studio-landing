@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // ffmpeg-static resolves its binary from __dirname; bundling it rewrites
+  // that to a placeholder path, so it must stay a real node_modules require.
+  serverExternalPackages: ["ffmpeg-static"],
   // The Top 50 chart is emailed from assets/, so the file must ship with the
   // serverless function that reads it.
   outputFileTracingIncludes: {

@@ -1,5 +1,6 @@
 import { jsonBody, openSample, sampleFile, storageFailure, writeStatus } from "@/lib/studio/sample/context"
 import { validateScript, type ScriptFile } from "@/lib/studio/sample/script"
+import { markStale } from "@/lib/studio/sample/status"
 import { StorageError, storageJson, storageUpload } from "@/lib/studio/storage"
 
 // The current script.json, or null before the Script stage has run.
@@ -35,7 +36,10 @@ export async function PUT(request: Request) {
       editedAt: new Date().toISOString(),
     }
     await storageUpload(sample.token, path, JSON.stringify(next, null, 2), "application/json")
-    const status = { ...sample.status, scriptApproved: next.approved }
+    // The spoken lines feed Voice (and the captions it times), so changing
+    // them makes the voice and everything after it out of date.
+    const linesChanged = JSON.stringify(current.draft.lines) !== JSON.stringify(next.draft.lines)
+    const status = { ...(linesChanged ? markStale(sample.status, "voice") : sample.status), scriptApproved: next.approved }
     await writeStatus(sample.token, sample.ref, status)
     return Response.json({ status, script: next })
   } catch (error) {

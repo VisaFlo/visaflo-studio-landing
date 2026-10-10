@@ -1,18 +1,7 @@
 import { Audio, Sequence, spring, useCurrentFrame, useVideoConfig } from "remotion"
 
-import { FPS, type Card, type Word } from "./types"
-
-type Timed = Card & { at: number }
-
-// A card appears on the first word of its line and stays. Up to three stack
-// in the top band, each built label → value → sub so nothing is ever an
-// empty box. Values shrink to stay on one line.
-function schedule(cards: Card[], words: Word[]): Timed[] {
-  return cards
-    .map((c) => ({ ...c, at: words.find((w) => w.line === c.line)?.start ?? 0 }))
-    .sort((a, b) => a.at - b.at)
-    .slice(0, 3)
-}
+import { scheduleCards, visibleCards } from "./cards-schedule"
+import { FPS, HEADLINE_SECONDS, type Card, type Word } from "./types"
 
 function valueSize(value: string): number {
   if (value.length <= 5) return 96
@@ -20,12 +9,15 @@ function valueSize(value: string): number {
   return 58
 }
 
+// Cards sit in the band above the face: at most two at a time (the newest
+// replaces the oldest), each built label → value → sub so nothing is ever an
+// empty box. Values shrink to stay on one line.
 export function Cards(props: { cards: Card[]; words: Word[]; layout: "boxed" | "full"; sfxWhoosh: string; sfxPop: string }) {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
-  const timed = schedule(props.cards, props.words)
-  const visible = timed.filter((c) => frame >= c.at * FPS)
-  const top = props.layout === "boxed" ? 240 : 150
+  const timed = scheduleCards(props.cards, props.words, HEADLINE_SECONDS)
+  const visible = visibleCards(timed, frame / FPS)
+  const top = props.layout === "boxed" ? 200 : 140
   return (
     <>
       {timed.map((c, i) => (
@@ -34,14 +26,14 @@ export function Cards(props: { cards: Card[]; words: Word[]; layout: "boxed" | "
         </Sequence>
       ))}
       <div style={{ position: "absolute", top, left: 60, right: 60, display: "flex", flexDirection: "column", gap: 20 }}>
-        {visible.map((c, i) => {
+        {visible.map((c) => {
           const local = frame - Math.round(c.at * FPS)
           const enter = spring({ frame: local, fps, config: { damping: 18, stiffness: 160 } })
           const valueIn = Math.min(1, Math.max(0, (local - 4) / 8))
           const subIn = Math.min(1, Math.max(0, (local - 10) / 8))
           return (
             <div
-              key={i}
+              key={`${c.line}-${c.label}`}
               style={{
                 transform: `translateY(${(1 - enter) * -40}px)`,
                 opacity: enter,

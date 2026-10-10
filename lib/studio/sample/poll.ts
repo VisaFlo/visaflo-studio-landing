@@ -9,21 +9,22 @@ import { mediaUrl, storageExists, storageMeta } from "@/lib/studio/storage"
 
 export type PollContext = { token: string; ref: SampleRef; status: SampleStatus; now?: Date }
 
-// A local render (npm run sample:render) is "done" once final.mp4 lands in
-// the folder with a download token.
-async function localFinal(token: string, ref: SampleRef): Promise<string | null> {
+// A local render (npm run sample:render) is "done" once a final.mp4 newer
+// than this run lands in the folder with a download token.
+async function localFinal(token: string, ref: SampleRef, startedAt?: string): Promise<string | null> {
   const name = sampleFile(ref, "final.mp4")
   if (!(await storageExists(token, name))) return null
   const meta = await storageMeta(token, name)
+  if (startedAt && meta.timeCreated && Date.parse(meta.timeCreated) < Date.parse(startedAt)) return null
   const downloadToken = meta.downloadTokens?.split(",")[0]
   return downloadToken ? mediaUrl(name, downloadToken) : null
 }
 
-async function askProvider(ctx: PollContext, job: StageJob): Promise<JobPoll> {
+async function askProvider(ctx: PollContext, job: StageJob, startedAt?: string): Promise<JobPoll> {
   if (job.provider === "fal") return pollFal(job)
   if (job.provider === "higgsfield") return pollHiggsfield(job)
   if (job.provider === "remotion") return pollLambdaRender(job)
-  const url = await localFinal(ctx.token, ctx.ref)
+  const url = await localFinal(ctx.token, ctx.ref, startedAt)
   return url ? { state: "done", videoUrl: url } : { state: "running" }
 }
 
@@ -54,22 +55,25 @@ async function finishRender(ctx: PollContext, job: StageJob, videoUrl: string): 
 export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
   const { status } = ctx
   const now = ctx.now ?? new Date()
-  const stage = STAGES.find((s) => status.stages[s].state === "running" && status.stages[s].job) as Stage | undefined
+  const stage = STAGES.find((s) => status.stages[s].state === "running") as Stage | undefined
   if (!stage) return status
   const state = status.stages[stage]
   if (timedOut(state, now, stage)) return failStage(status, stage, "The job timed out; run the stage again.", now)
+  // Running inside a request with no provider job: nothing to ask yet. If the
+  // request died, the timeout above is the way out.
+  if (!state.job) return status
 
   let result: JobPoll
   try {
-    result = await askProvider(ctx, state.job!)
+    result = await askProvider(ctx, state.job, state.startedAt)
   } catch (error) {
     return failStage(status, stage, error instanceof Error ? error.message : String(error), now)
   }
   if (result.state === "running") return status
   if (result.state === "failed") return failStage(status, stage, result.error, now)
   try {
-    if (stage === "video") return await finishVideo(ctx, state.job!, result.videoUrl)
-    if (stage === "render") return await finishRender(ctx, state.job!, result.videoUrl)
+    if (stage === "video") return await finishVideo(ctx, state.job, result.videoUrl)
+    if (stage === "render") return await finishRender(ctx, state.job, result.videoUrl)
     return failStage(status, stage, `No finisher for ${stage}`, now)
   } catch (error) {
     return failStage(status, stage, error instanceof Error ? error.message : String(error), now)

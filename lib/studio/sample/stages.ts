@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 
 import { OWN_TOPIC_ID, TOPICS } from "@/lib/studio/content"
-import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
+import { sampleFile, writeStatus, type SampleRef } from "@/lib/studio/sample/context"
 import { audioCost, PRICES, ttsCost } from "@/lib/studio/sample/costs"
 import { composeMusic, createVoice, soundEffect, synthesize } from "@/lib/studio/sample/elevenlabs"
 import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/fal"
@@ -120,6 +120,8 @@ const voice: StageWork = async ({ token, ref, status }) => {
       sample,
       filename: "voice-sample.wav",
     })
+    // Keep the clone even if the rest of this run fails: plans cap voices.
+    await writeStatus(token, ref, { ...status, voiceId })
   }
 
   const text = file.draft.lines.map((l) => l.tts_text).join("\n\n")

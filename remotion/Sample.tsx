@@ -2,7 +2,7 @@ import { AbsoluteFill, Audio, OffthreadVideo, useCurrentFrame, useVideoConfig } 
 
 import { Captions } from "./Captions"
 import { Cards } from "./Cards"
-import { FPS, type SampleProps } from "./types"
+import { FPS, HEADLINE_SECONDS, type SampleProps } from "./types"
 
 const FONT = "'Inter', 'Helvetica Neue', Arial, sans-serif"
 
@@ -21,7 +21,7 @@ export function Sample(props: SampleProps) {
   const frame = useCurrentFrame()
   const { durationInFrames } = useVideoConfig()
   const boxed = props.layout === "boxed"
-  const showHeadline = frame < 2.5 * FPS
+  const showHeadline = frame < HEADLINE_SECONDS * FPS
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#0c0a09", fontFamily: FONT, color: "white" }}>
@@ -48,7 +48,7 @@ export function Sample(props: SampleProps) {
             fontSize: 44,
             fontWeight: 600,
             lineHeight: 1.2,
-            opacity: Math.min(1, frame / 8) * Math.min(1, (2.5 * FPS - frame) / 8),
+            opacity: Math.min(1, frame / 8) * Math.min(1, (HEADLINE_SECONDS * FPS - frame) / 8),
           }}
         >
           {props.headline}

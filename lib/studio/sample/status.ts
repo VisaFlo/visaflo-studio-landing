@@ -106,14 +106,66 @@ function patchStage(status: SampleStatus, stage: Stage, patch: StageState): Samp
   return { ...status, stages: { ...status.stages, [stage]: patch } }
 }
 
-export function startStage(status: SampleStatus, stage: Stage, now = new Date()): SampleStatus {
-  let next = patchStage(status, stage, { state: "running", startedAt: now.toISOString() })
-  // Anything built on this stage's old output is now out of date.
-  for (const later of STAGES.slice(STAGES.indexOf(stage) + 1)) {
+// Every stage that (transitively) consumes `stage`'s output.
+export function dependentsOf(stage: Stage): Stage[] {
+  const out = new Set<Stage>()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const s of STAGES) {
+      if (out.has(s)) continue
+      if (DEPENDS[s].some((d) => d === stage || out.has(d))) {
+        out.add(s)
+        grew = true
+      }
+    }
+  }
+  return STAGES.filter((s) => out.has(s))
+}
+
+// Finished stages built on `stage`'s output are now out of date. Stages that
+// don't use it (Script after a Prep re-run, Audio after a Video re-run) stay.
+export function markDependentsStale(status: SampleStatus, stage: Stage): SampleStatus {
+  let next = status
+  for (const later of dependentsOf(stage)) {
     if (next.stages[later].state === "done") next = patchStage(next, later, { ...next.stages[later], state: "stale" })
   }
+  return next
+}
+
+// The stage's own output changed underneath it (e.g. the script lines were
+// edited after Voice ran): it and everything built on it are out of date.
+export function markStale(status: SampleStatus, stage: Stage): SampleStatus {
+  const own = status.stages[stage].state === "done" ? patchStage(status, stage, { ...status.stages[stage], state: "stale" }) : status
+  return markDependentsStale(own, stage)
+}
+
+export function startStage(status: SampleStatus, stage: Stage, now = new Date()): SampleStatus {
+  let next = patchStage(status, stage, { state: "running", startedAt: now.toISOString() })
+  next = markDependentsStale(next, stage)
   if (stage === "script") next = { ...next, scriptApproved: false }
   return next
+}
+
+// Top-level fields each stage is allowed to change.
+const PRODUCES: Record<Stage, (keyof SampleStatus)[]> = {
+  prep: ["recordingSeconds"],
+  script: ["scriptApproved"],
+  voice: ["voiceId", "speechSeconds"],
+  video: [],
+  audio: [],
+  render: [],
+  send: [],
+}
+
+// A run route holds a status for minutes while the poller may move other
+// stages on. Before writing, re-read and lay only this stage's result over
+// the fresh copy so nothing another write did is undone.
+export function mergeStageResult(fresh: SampleStatus, ran: SampleStatus, stage: Stage): SampleStatus {
+  let next = markDependentsStale(fresh, stage)
+  next = patchStage(next, stage, ran.stages[stage])
+  for (const key of PRODUCES[stage]) if (ran[key] !== undefined) next = { ...next, [key]: ran[key] }
+  return { ...next, assets: { ...fresh.assets, ...ran.assets } }
 }
 
 export function setJob(status: SampleStatus, stage: Stage, job: StageJob): SampleStatus {

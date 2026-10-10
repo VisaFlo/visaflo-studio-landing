@@ -24,14 +24,32 @@ export async function submitFal(model: string, input: Record<string, unknown>): 
   return { provider: "fal", id: body.request_id, statusUrl: body.status_url, responseUrl: body.response_url }
 }
 
+// A provider blip (5xx, rate limit, dropped connection) is not an answer about
+// the job: keep polling and let the stage timeout be the backstop, so a paid
+// job isn't abandoned and re-bought.
+export function isBlip(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408
+}
+
+export async function fetchOrBlip(url: string, init: RequestInit): Promise<Response | "blip"> {
+  try {
+    const response = await fetch(url, init)
+    return isBlip(response.status) ? "blip" : response
+  } catch {
+    return "blip"
+  }
+}
+
 export async function pollFal(job: StageJob): Promise<JobPoll> {
   if (!job.statusUrl || !job.responseUrl) return { state: "failed", error: "fal job lost its urls" }
-  const status = await fetch(job.statusUrl, { headers: headers(), cache: "no-store" })
+  const status = await fetchOrBlip(job.statusUrl, { headers: headers(), cache: "no-store" })
+  if (status === "blip") return { state: "running" }
   if (!status.ok) return { state: "failed", error: `fal status ${status.status}: ${(await status.text()).slice(0, 200)}` }
   const body = (await status.json()) as { status: string; error?: string }
   if (body.status === "IN_QUEUE" || body.status === "IN_PROGRESS") return { state: "running" }
   if (body.status !== "COMPLETED") return { state: "failed", error: `fal ${body.status}: ${body.error ?? ""}`.trim() }
-  const result = await fetch(job.responseUrl, { headers: headers(), cache: "no-store" })
+  const result = await fetchOrBlip(job.responseUrl, { headers: headers(), cache: "no-store" })
+  if (result === "blip") return { state: "running" }
   if (!result.ok) return { state: "failed", error: `fal result ${result.status}: ${(await result.text()).slice(0, 200)}` }
   const out = (await result.json()) as { video?: { url?: string } }
   return out.video?.url ? { state: "done", videoUrl: out.video.url } : { state: "failed", error: "fal returned no video" }

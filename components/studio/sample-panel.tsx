@@ -37,7 +37,9 @@ export function SamplePanel({ submission }: { submission: Submission }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [notes, setNotes] = useState("")
+  const [tick, setTick] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const polling = useRef(false)
 
   useEffect(() => {
     if (!user) return
@@ -54,19 +56,27 @@ export function SamplePanel({ submission }: { submission: Submission }) {
     }
   }, [user, id])
 
-  // While a provider job runs, ask the poll route every 5 s.
-  const running = status ? STAGES.some((s) => status.stages[s].state === "running" && status.stages[s].job) : false
+  // While a stage is running (a provider job, or a run that may have died),
+  // ask the poll route every 5 s. One poll in flight at a time; an error
+  // doesn't stop the loop.
+  const running = status ? STAGES.some((s) => status.stages[s].state === "running") : false
   useEffect(() => {
     if (!user || !running) return
     timer.current = setTimeout(() => {
+      if (polling.current) return
+      polling.current = true
       poll(user, id)
         .then(setStatus)
         .catch((e: Error) => setError(e.message))
+        .finally(() => {
+          polling.current = false
+          setTick((n) => n + 1)
+        })
     }, 5000)
     return () => {
       if (timer.current) clearTimeout(timer.current)
     }
-  }, [user, id, running, status])
+  }, [user, id, running, status, tick])
 
   if (!user) return null
 

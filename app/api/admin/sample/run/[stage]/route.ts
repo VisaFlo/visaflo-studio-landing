@@ -1,6 +1,6 @@
-import { jsonBody, openSample, storageFailure, writeStatus } from "@/lib/studio/sample/context"
+import { jsonBody, openSample, readStatus, storageFailure, writeStatus } from "@/lib/studio/sample/context"
 import { describeError, STAGE_WORK } from "@/lib/studio/sample/stages"
-import { blockers, failStage, finishStage, setJob, STAGES, startStage, type Stage } from "@/lib/studio/sample/status"
+import { blockers, failStage, finishStage, mergeStageResult, setJob, STAGES, startStage, type Stage } from "@/lib/studio/sample/status"
 
 // Downloads, ffmpeg and provider calls can take a few minutes.
 export const maxDuration = 300
@@ -34,6 +34,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ sta
     console.error(`Sample stage ${stage} failed for ${ref.folder}`, error)
     status = failStage(status, stage as Stage, describeError(error))
   }
-  await writeStatus(token, ref, status)
-  return Response.json(status)
+
+  // The poller may have moved other stages on while this ran: lay only this
+  // stage's result over a fresh copy.
+  try {
+    const merged = mergeStageResult(await readStatus(token, ref), status, stage as Stage)
+    await writeStatus(token, ref, merged)
+    return Response.json(merged)
+  } catch (error) {
+    return storageFailure(error) ?? Response.json({ error: "We couldn't save the sample status.", status }, { status: 500 })
+  }
 }
