@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import * as fal from "@/lib/studio/sample/fal"
 import * as higgsfield from "@/lib/studio/sample/higgsfield"
+import * as localRender from "@/lib/studio/sample/local-render"
 import { pollJob } from "@/lib/studio/sample/poll"
 import * as render from "@/lib/studio/sample/render"
 import * as stages from "@/lib/studio/sample/stages"
@@ -75,6 +76,7 @@ describe("pollJob", () => {
 
   it("finishes a local render once a final.mp4 newer than the run is in the folder", async () => {
     vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    vi.spyOn(localRender, "localRenderAvailable").mockReturnValue(false)
     const started = new Date("2026-10-09T10:00:00Z")
     const now = new Date("2026-10-09T10:06:00Z")
     const status = setJob(startStage(defaultStatus(), "render", started), "render", { provider: "local", id: "render-props.json" })
@@ -109,5 +111,50 @@ describe("pollJob", () => {
     expect(next.stages.render.state).toBe("done")
     expect(next.assets["final.mp4"]).toBe("https://bucket/final.mp4")
     expect(next.stages.render.cost).toBeCloseTo(0.02, 2)
+  })
+})
+
+describe("pollJob with a local render", () => {
+  const manual = { provider: "local" as const, id: "render-props.json" }
+  const running = () => setJob(startStage(defaultStatus(), "render"), "render", manual)
+
+  it("starts the render on this machine when the props are waiting and it can", async () => {
+    vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    vi.spyOn(localRender, "localRenderAvailable").mockReturnValue(true)
+    const spawn = vi.spyOn(localRender, "spawnLocalRender").mockReturnValue({ provider: "local", id: "pid:7" })
+    const now = new Date("2026-10-09T10:08:00Z")
+    const next = await pollJob({ token: "t", ref, status: running(), now })
+    expect(spawn).toHaveBeenCalledWith("u/s", "t")
+    expect(next.stages.render.state).toBe("running")
+    expect(next.stages.render.job).toEqual({ provider: "local", id: "pid:7" })
+    // The timeout clock starts when the render does, not when the props were written.
+    expect(next.stages.render.startedAt).toBe(now.toISOString())
+  })
+
+  it("leaves the props for a manual run where it can't render", async () => {
+    vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    vi.spyOn(localRender, "localRenderAvailable").mockReturnValue(false)
+    const spawn = vi.spyOn(localRender, "spawnLocalRender")
+    const next = await pollJob({ token: "t", ref, status: running() })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(next.stages.render.job).toEqual(manual)
+  })
+
+  it("fails with the log tail when the render process died without a final.mp4", async () => {
+    vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    vi.spyOn(localRender, "processAlive").mockReturnValue(false)
+    vi.spyOn(localRender, "logTail").mockReturnValue("Error: Chrome crashed")
+    const status = setJob(startStage(defaultStatus(), "render"), "render", { provider: "local", id: "pid:7" })
+    const next = await pollJob({ token: "t", ref, status })
+    expect(next.stages.render.state).toBe("failed")
+    expect(next.stages.render.error).toContain("Chrome crashed")
+  })
+
+  it("keeps waiting while the render process is alive", async () => {
+    vi.spyOn(storage, "storageExists").mockResolvedValue(false)
+    vi.spyOn(localRender, "processAlive").mockReturnValue(true)
+    const status = setJob(startStage(defaultStatus(), "render"), "render", { provider: "local", id: "pid:7" })
+    const next = await pollJob({ token: "t", ref, status })
+    expect(next.stages.render.state).toBe("running")
   })
 })

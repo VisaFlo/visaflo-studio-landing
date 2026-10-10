@@ -45,8 +45,12 @@ and request a sample video.
   pre-checked script from `lib/studio/sample/scripts.ts`, already approved)
   → Voice (ElevenLabs clone + TTS with word timings) → Video (A: own
   footage + fal lipsync, B: Higgsfield Seedance + lipsync, C: fal OmniHuman)
-  → Audio (ElevenLabs music + SFX) → Render (Remotion Lambda, or
-  `npm run sample:render` locally). The run stops, with the reason under
+  → Audio (ElevenLabs music + SFX) → Render (Remotion Lambda when the
+  `REMOTION_*` keys are set; otherwise the dev server runs
+  `npm run sample:render` on this machine with its Chrome, log in
+  `$TMPDIR/visaflo-render-<uid>-<submissionId>.log`; on Vercel without
+  Lambda it only writes `render-props.json` for someone to run that command
+  by hand). The run stops, with the reason under
   the button, when a step fails, when method B or C still needs a face
   frame picked, or when a GPT draft (the "GPT draft" button in the Script
   card asks GPT-6 Sol for a fresh script from canada.ca) hasn't been

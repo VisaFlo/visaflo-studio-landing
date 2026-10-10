@@ -25,15 +25,17 @@ export function renderProps(status: SampleStatus, script: Script, words: Word[])
   }
 }
 
-function lambda() {
-  const functionName = process.env.REMOTION_FUNCTION_NAME
-  const serveUrl = process.env.REMOTION_SERVE_URL
-  const region = process.env.REMOTION_REGION as AwsRegion | undefined
+type Env = Record<string, string | undefined>
+
+function lambda(env: Env = process.env) {
+  const functionName = env.REMOTION_FUNCTION_NAME
+  const serveUrl = env.REMOTION_SERVE_URL
+  const region = env.REMOTION_REGION as AwsRegion | undefined
   return functionName && serveUrl && region ? { functionName, serveUrl, region } : null
 }
 
-export function lambdaConfigured(): boolean {
-  return lambda() !== null
+export function lambdaConfigured(env: Env = process.env): boolean {
+  return lambda(env) !== null
 }
 
 // @remotion/lambda reads REMOTION_AWS_ACCESS_KEY_ID / REMOTION_AWS_SECRET_ACCESS_KEY itself.

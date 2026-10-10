@@ -356,7 +356,9 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                       {s.error && <span className="text-[13px] text-[#c2410c]">{s.error}</span>}
                       {stage === "render" && s.job?.provider === "local" && s.state === "running" && (
                         <span className="text-[13px] text-stone-600">
-                          No Remotion Lambda configured. On a dev machine: <code>STUDIO_ADMIN_TOKEN=… npm run sample:render -- {id}</code>
+                          {s.job.id.startsWith("pid:")
+                            ? "Rendering with Chrome on this machine, usually 1–3 minutes."
+                            : <>No Remotion Lambda configured. On a dev machine: <code>STUDIO_ADMIN_TOKEN=… npm run sample:render -- {id}</code></>}
                         </span>
                       )}
                     </span>

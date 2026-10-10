@@ -2,6 +2,7 @@ import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
 import { PRICES, videoCost } from "@/lib/studio/sample/costs"
 import { LIPSYNC_MODELS, pollFal, submitFal, type JobPoll } from "@/lib/studio/sample/fal"
 import { pollHiggsfield } from "@/lib/studio/sample/higgsfield"
+import { localPid, localRenderAvailable, localRenderLog, logTail, processAlive, spawnLocalRender } from "@/lib/studio/sample/local-render"
 import { pollLambdaRender } from "@/lib/studio/sample/render"
 import { clipSeconds, copyToSample } from "@/lib/studio/sample/stages"
 import { failStage, finishStage, setJob, STAGES, timedOut, type SampleStatus, type Stage, type StageJob } from "@/lib/studio/sample/status"
@@ -51,6 +52,26 @@ async function finishRender(ctx: PollContext, job: StageJob, videoUrl: string): 
   return finishStage(ctx.status, "render", { cost: local ? 0 : PRICES.lambdaRender, assets: { "final.mp4": finalUrl } })
 }
 
+// A render without Lambda: done once the script's final.mp4 lands. If the
+// props are still waiting and this machine can render, start it here (this
+// also rescues a run started before the server could). A started render
+// whose process is gone with no final.mp4 fails now, not at the timeout.
+async function pollLocalRender(ctx: PollContext, stage: Stage, job: StageJob, startedAt: string | undefined, now: Date): Promise<SampleStatus> {
+  const { status, ref } = ctx
+  const url = await localFinal(ctx.token, ref, startedAt)
+  if (url) return finishRender(ctx, job, url)
+  const id = `${ref.uid}/${ref.submissionId}`
+  const pid = localPid(job)
+  if (pid === null) {
+    if (!localRenderAvailable()) return status
+    const started = setJob(status, stage, spawnLocalRender(id, ctx.token))
+    // The timeout clock starts when the render does, not when the props were written.
+    return { ...started, stages: { ...started.stages, [stage]: { ...started.stages[stage], startedAt: now.toISOString() } } }
+  }
+  if (processAlive(pid)) return status
+  return failStage(status, stage, `The local render stopped before final.mp4 was uploaded. ${logTail(id) || `See ${localRenderLog(id)}.`}`, now)
+}
+
 // Called every few seconds by the admin page while something is running.
 export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
   const { status } = ctx
@@ -62,6 +83,7 @@ export async function pollJob(ctx: PollContext): Promise<SampleStatus> {
   // Running inside a request with no provider job: nothing to ask yet. If the
   // request died, the timeout above is the way out.
   if (!state.job) return status
+  if (state.job.provider === "local") return pollLocalRender(ctx, stage, state.job, state.startedAt, now)
 
   let result: JobPoll
   try {

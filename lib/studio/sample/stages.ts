@@ -8,6 +8,7 @@ import { composeMusic, createVoice, soundEffect, synthesize } from "@/lib/studio
 import { LIPSYNC_MODELS, OMNIHUMAN_MODEL, submitFal } from "@/lib/studio/sample/fal"
 import { cutClip, downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
 import { submitSeedance } from "@/lib/studio/sample/higgsfield"
+import { localRenderAvailable, MANUAL_RENDER_JOB, spawnLocalRender } from "@/lib/studio/sample/local-render"
 import { MUSIC_PROMPT, OMNIHUMAN_PROMPT, scenePrompt, SFX } from "@/lib/studio/sample/prompts"
 import { lambdaConfigured, renderProps, startLambdaRender } from "@/lib/studio/sample/render"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
@@ -190,15 +191,16 @@ const audio: StageWork = async ({ token, ref, status }) => {
   return { done: true, cost: audioCost(status.speechSeconds), patch: { assets } }
 }
 
-// Remotion Lambda when configured; otherwise leave the props for
-// `npm run sample:render`, which uploads final.mp4 for the poller to find.
+// Remotion Lambda when configured; otherwise write the props and run
+// `npm run sample:render` on this machine (or, on Vercel, leave them for
+// someone to run it). Either way the script uploads final.mp4 for the poller.
 const render: StageWork = async ({ token, ref, status }) => {
   const file = await storageJson<ScriptFile>(token, sampleFile(ref, "script.json"))
   const words = await storageJson<Word[]>(token, sampleFile(ref, "words.json"))
   const props = renderProps(status, file.draft, words)
   if (lambdaConfigured()) return { done: false, job: await startLambdaRender(props) }
   await uploadAsset(token, ref, "render-props.json", JSON.stringify(props), "application/json")
-  return { done: false, job: { provider: "local", id: "render-props.json" } }
+  return { done: false, job: localRenderAvailable() ? spawnLocalRender(`${ref.uid}/${ref.submissionId}`, token) : MANUAL_RENDER_JOB }
 }
 
 export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice, video, audio, render }
