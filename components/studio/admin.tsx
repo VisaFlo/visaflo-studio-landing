@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { sendEmailVerification, type User } from "firebase/auth"
 
+import { SamplePanel } from "@/components/studio/sample-panel"
 import { AccountHeader, Display, ErrorText, MonoLabel, Page, SecondaryButton } from "@/components/studio/ui"
 import { isStudioAdmin, type Submission } from "@/lib/studio/admin"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
@@ -264,47 +265,50 @@ function SubmissionDetail({ submission: s }: { submission: Submission }) {
     ["Submission", s.submissionId],
   ]
   return (
-    <div className="grid grid-cols-1 gap-6 pb-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      {s.video ? (
-        <video
-          src={s.video.url}
-          controls
-          playsInline
-          preload="metadata"
-          className="max-h-[70vh] w-full bg-stone-950 object-contain"
-        />
-      ) : (
-        <div className="flex aspect-video items-center justify-center bg-stone-100 text-[14px] text-stone-600">
-          No playable video. Open the folder in Firebase.
-        </div>
-      )}
-      <div className="flex flex-col gap-5">
-        <dl className="m-0 grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[14px]">
-          {rows.map(([label, value]) => (
-            <div key={label} className="contents">
-              <dt className="text-stone-600">{label}</dt>
-              <dd className="m-0 break-words">{value}</dd>
-            </div>
-          ))}
-        </dl>
-        {s.consent && <p className="m-0 border-l-2 border-stone-200 pl-3 text-[13px] text-stone-600">“{s.consent}”</p>}
-        {s.problem && <ErrorText>{s.problem}</ErrorText>}
-        <div className="flex flex-wrap gap-x-6 gap-y-2 text-[14px]">
-          {s.video && (
-            <a href={s.video.url} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
-              Open video
+    <div className="flex flex-col gap-6 pb-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {s.video ? (
+          <video
+            src={s.video.url}
+            controls
+            playsInline
+            preload="metadata"
+            className="max-h-[70vh] w-full bg-stone-950 object-contain"
+          />
+        ) : (
+          <div className="flex aspect-video items-center justify-center bg-stone-100 text-[14px] text-stone-600">
+            No playable video. Open the folder in Firebase.
+          </div>
+        )}
+        <div className="flex flex-col gap-5">
+          <dl className="m-0 grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[14px]">
+            {rows.map(([label, value]) => (
+              <div key={label} className="contents">
+                <dt className="text-stone-600">{label}</dt>
+                <dd className="m-0 break-words">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {s.consent && <p className="m-0 border-l-2 border-stone-200 pl-3 text-[13px] text-stone-600">“{s.consent}”</p>}
+          {s.problem && <ErrorText>{s.problem}</ErrorText>}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-[14px]">
+            {s.video && (
+              <a href={s.video.url} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
+                Open video
+              </a>
+            )}
+            <a href={s.consoleUrl} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
+              Open in Firebase
             </a>
-          )}
-          <a href={s.consoleUrl} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
-            Open in Firebase
-          </a>
-          {s.email && (
-            <a href={`mailto:${s.email}`} className="underline underline-offset-[3px]">
-              Email them
-            </a>
-          )}
+            {s.email && (
+              <a href={`mailto:${s.email}`} className="underline underline-offset-[3px]">
+                Email them
+              </a>
+            )}
+          </div>
         </div>
       </div>
+      <SamplePanel submission={s} />
     </div>
   )
 }
