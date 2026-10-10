@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
     "/api/top50": ["./assets/top50-*.png"],
     "/api/playbook": ["./assets/video-playbook.pdf", "./assets/video-playbook-research-kit.zip"],
     "/playbook/opengraph-image": ["./assets/fonts/*.ttf"],
+    // The sample pipeline shells out to ffmpeg-static's binary.
+    "/api/admin/sample/run/[stage]": ["./node_modules/ffmpeg-static/ffmpeg"],
   },
   // Short links for the Instantly cold campaign, so emails don't show long
   // UTM URLs. Use them only in Instantly: every visit is credited to it.
