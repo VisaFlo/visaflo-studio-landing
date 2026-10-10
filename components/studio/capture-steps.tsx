@@ -56,7 +56,7 @@ export function CaptureStepper({ current, progress = 0 }: { current: number; pro
 
 function PreviewStage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[620px]">{children}</div>
+    <div className="relative flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[620px]">{children}</div>
   )
 }
 
@@ -210,7 +210,18 @@ function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint
 
 const COUNTDOWN_SECONDS = 3
 
-export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (result: { faceSeen: boolean }) => void }) {
+// `stream` is the vertical crop the person sees and records; `camera` is the
+// raw camera it was cut from. The face check reads the camera frame (which
+// MediaPipe handles reliably) and measures positions inside the same crop.
+export function AlignStep({
+  stream,
+  camera,
+  onStart,
+}: {
+  stream: MediaStream
+  camera: MediaStream
+  onStart: (result: { faceSeen: boolean }) => void
+}) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
@@ -287,7 +298,8 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       }
       stage={
         <PreviewStage>
-          <PortraitFrame stream={stream} onVideo={setVideo} dim={live && !aligned && countdown === null}>
+          <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
+          <PortraitFrame stream={stream} dim={live && !aligned && countdown === null}>
             {countdown !== null && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white" aria-hidden>
                 <span className="font-serif text-[96px] leading-none font-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]">

@@ -67,7 +67,9 @@ export function CaptureFlow() {
   // What gets previewed and recorded: the vertical crop of the camera.
   const [stream, setStream] = useState<MediaStream | null>(null)
   const portrait = useRef<PortraitStream | null>(null)
-  // The camera itself, for cleanup paths (unmount) that can't rely on state.
+  // The camera itself: the face check reads it, and cleanup paths (unmount)
+  // that can't rely on state use the ref.
+  const [camera, setCamera] = useState<MediaStream | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [cameraBusy, setCameraBusy] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -139,6 +141,7 @@ export function CaptureFlow() {
     portrait.current = null
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
+    setCamera(null)
     setStream(null)
   }, [])
 
@@ -175,6 +178,7 @@ export function CaptureFlow() {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
       streamRef.current = media
+      setCamera(media)
       portrait.current?.stop()
       portrait.current = portraitStream(media)
       setStream(portrait.current.stream)
@@ -419,10 +423,10 @@ export function CaptureFlow() {
         </>
       )}
 
-      {step === "align" && stream && (
+      {step === "align" && stream && camera && (
         <>
           <FlowHeader title="Face and voice" step="Step 1 of 2" onBack={() => { stopCamera(); setStep("setup") }} />
-          <AlignStep stream={stream} onStart={beginScript} />
+          <AlignStep stream={stream} camera={camera} onStart={beginScript} />
         </>
       )}
 
