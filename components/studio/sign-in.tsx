@@ -15,17 +15,14 @@ import {
   useStudioUser,
 } from "@/lib/studio/auth"
 import { identify, track } from "@/lib/mixpanel"
+import { returnPath } from "@/lib/studio/return-path"
 import { AccountHeader, Display, ErrorText, Field, Page, PrimaryButton, QuietButton } from "@/components/studio/ui"
 
 type Mode = "sign-in" | "sign-up" | "code" | "reset-sent"
 
-const START = "/start"
-// Pages that can send someone here and get them back after sign-in.
-const RETURN_PAGES = ["/admin"]
-
+// Admin pages send someone here and get them back after sign-in.
 function afterSignIn(): string {
-  const next = new URLSearchParams(window.location.search).get("next")
-  return next && RETURN_PAGES.includes(next) ? next : START
+  return returnPath(new URLSearchParams(window.location.search).get("next"))
 }
 
 export function SignIn() {

@@ -38,7 +38,8 @@ and request a sample video.
   decide access and there is still no service account. An unverified admin
   email gets a "Send verification email" button on the page.
 
-- **Sample pipeline**: from a submission's row in `/admin`, "Make sample" runs
+- **Sample pipeline**: on a submission's own page (`/admin/{uid}/{submissionId}`,
+  reached from the `/admin` list), "Make sample" runs
   Prep (ffmpeg: voice sample + face frames) → Script (the topic's fixed,
   pre-checked script from `lib/studio/sample/scripts.ts`; a "GPT draft"
   button asks GPT-6 Sol for a fresh one from canada.ca) → Voice (ElevenLabs

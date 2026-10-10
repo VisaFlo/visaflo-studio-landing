@@ -85,6 +85,12 @@ async function inBatches<T, R>(inputs: T[], size: number, work: (input: T) => Pr
   return results
 }
 
+// One submission by "uid/submissionId", for its own page.
+export async function loadSubmission(token: string, uid: string, submissionId: string): Promise<Submission> {
+  const folder = `studio/${uid}/${submissionId}`
+  return readSubmission(token, folder, (await listObjects(token, `${folder}/`)).items)
+}
+
 // Every studio/{uid}/{submissionId}/ folder, newest first.
 export async function loadSubmissions(token: string): Promise<Submission[]> {
   const people = await listObjects(token, "studio/")
