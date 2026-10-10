@@ -38,6 +38,21 @@ and request a sample video.
   decide access and there is still no service account. An unverified admin
   email gets a "Send verification email" button on the page.
 
+- **Sample pipeline**: from a submission's row in `/admin`, "Make sample" runs
+  Prep (ffmpeg: voice sample + face frames) → Script (the topic's fixed,
+  pre-checked script from `lib/studio/sample/scripts.ts`; a "GPT draft"
+  button asks GPT-6 Sol for a fresh one from canada.ca) → Voice (ElevenLabs
+  clone + TTS with word timings) → Video (A: own footage + fal lipsync,
+  B: Higgsfield Seedance + lipsync, C: fal OmniHuman) → Audio (ElevenLabs
+  music + SFX) → Render (Remotion Lambda, or `npm run sample:render`
+  locally). Everything is written to `{submissionId}/sample/`, with
+  `status.json` as the ledger (stage states, job ids, costs). Design and
+  prompts: `docs/superpowers/specs/2026-10-09-studio-sample-pipeline-design.md`.
+  Keys: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` (Starter plan or higher for
+  voice cloning), `FAL_KEY`, `HIGGSFIELD_KEY_ID/SECRET`, `REMOTION_*`.
+  `npm run remotion:fixtures && npm run remotion:studio` previews the
+  composition with synthetic media.
+
 ## Before it works in production
 
 1. **Storage rules** (Firebase console or CLI, project owner): publish
