@@ -1,66 +1,7 @@
 import type { Submission } from "@/lib/studio/admin"
+import { consoleUrl, listObjects, mediaUrl, storageGet, StorageError, type ObjectMeta } from "@/lib/studio/storage"
 
-const BUCKET = "devdashboard-c9159-ca"
-const PROJECT_ID = "devdashboard-c9159"
-
-// Local QA: the same Storage emulator the browser uploads to (see
-// docs/studio-capture/README.md).
-function storageBase(): string {
-  const host =
-    process.env.NODE_ENV !== "production"
-      ? (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST ?? process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST)
-      : undefined
-  return host ? `http://${host}:9199` : "https://firebasestorage.googleapis.com"
-}
-
-export class StorageError extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-  ) {
-    super(`Storage responded ${status}: ${detail.slice(0, 300)}`)
-  }
-}
-
-// Reads go through the Firebase Storage API with the admin's own ID token, so
-// the storage rules decide what they can see and no service account is needed.
-async function storageGet(token: string, path: string): Promise<Response> {
-  const response = await fetch(`${storageBase()}/v0/b/${BUCKET}/o${path}`, {
-    headers: { Authorization: `Firebase ${token}` },
-    cache: "no-store",
-  })
-  if (!response.ok) throw new StorageError(response.status, await response.text())
-  return response
-}
-
-type Listing = { prefixes: string[]; items: string[] }
-
-// One folder level, the way the Firebase SDK lists: prefix plus "/" delimiter.
-async function list(token: string, prefix: string): Promise<Listing> {
-  const listing: Listing = { prefixes: [], items: [] }
-  let pageToken: string | undefined
-  do {
-    const query = new URLSearchParams({ prefix, delimiter: "/", maxResults: "1000" })
-    if (pageToken) query.set("pageToken", pageToken)
-    const body = (await (await storageGet(token, `?${query}`)).json()) as {
-      prefixes?: string[]
-      items?: { name: string }[]
-      nextPageToken?: string
-    }
-    listing.prefixes.push(...(body.prefixes ?? []))
-    listing.items.push(...(body.items ?? []).map((item) => item.name))
-    pageToken = body.nextPageToken
-  } while (pageToken)
-  return listing
-}
-
-type ObjectMeta = {
-  size?: string
-  contentType?: string
-  timeCreated?: string
-  downloadTokens?: string
-  metadata?: Record<string, string>
-}
+export { StorageError }
 
 type RequestJson = {
   email?: string
@@ -75,10 +16,6 @@ type RequestJson = {
 }
 
 const encode = (name: string) => encodeURIComponent(name)
-
-function consoleUrl(folder: string): string {
-  return `https://console.firebase.google.com/project/${PROJECT_ID}/storage/${BUCKET}/files/~2F${folder.split("/").join("~2F")}`
-}
 
 async function readSubmission(token: string, folder: string, items: string[]): Promise<Submission> {
   const [, uid, submissionId] = folder.split("/")
@@ -114,7 +51,7 @@ async function readSubmission(token: string, folder: string, items: string[]): P
     const downloadToken = meta.downloadTokens?.split(",")[0]
     if (recording && downloadToken) {
       submission.video = {
-        url: `${storageBase()}/v0/b/${BUCKET}/o/${encode(recording)}?alt=media&token=${downloadToken}`,
+        url: mediaUrl(recording, downloadToken),
         contentType: meta.contentType ?? "video/mp4",
         bytes: Number(meta.size) || 0,
       }
@@ -150,11 +87,11 @@ async function inBatches<T, R>(inputs: T[], size: number, work: (input: T) => Pr
 
 // Every studio/{uid}/{submissionId}/ folder, newest first.
 export async function loadSubmissions(token: string): Promise<Submission[]> {
-  const people = await list(token, "studio/")
-  const folders = (await inBatches(people.prefixes, 10, (prefix) => list(token, prefix))).flatMap((l) => l.prefixes)
+  const people = await listObjects(token, "studio/")
+  const folders = (await inBatches(people.prefixes, 10, (prefix) => listObjects(token, prefix))).flatMap((l) => l.prefixes)
   const submissions = await inBatches(folders, 10, async (prefix) => {
     const folder = prefix.replace(/\/$/, "")
-    return readSubmission(token, folder, (await list(token, prefix)).items)
+    return readSubmission(token, folder, (await listObjects(token, prefix)).items)
   })
   const at = (s: Submission) => s.requestedAt ?? s.recordedAt ?? ""
   return submissions.sort((a, b) => at(b).localeCompare(at(a)))
