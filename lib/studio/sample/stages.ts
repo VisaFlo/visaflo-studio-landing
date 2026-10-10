@@ -3,12 +3,14 @@ import path from "node:path"
 
 import { OWN_TOPIC_ID, TOPICS } from "@/lib/studio/content"
 import { sampleFile, type SampleRef } from "@/lib/studio/sample/context"
-import { PRICES } from "@/lib/studio/sample/costs"
+import { PRICES, ttsCost } from "@/lib/studio/sample/costs"
+import { createVoice, synthesize } from "@/lib/studio/sample/elevenlabs"
 import { downloadTo, extractFrame, extractVoiceSample, frameTimes, probeSeconds, tmpDir } from "@/lib/studio/sample/ffmpeg"
 import { generateScript, SCRIPT_MODEL, type ScriptFile } from "@/lib/studio/sample/script"
 import { templateFor, templateId } from "@/lib/studio/sample/scripts"
 import type { SampleStatus, Stage, StageJob, StagePatch } from "@/lib/studio/sample/status"
-import { listObjects, mediaUrl, storageGet, storageJson, storageMeta, storageUpload, StorageError } from "@/lib/studio/storage"
+import { wordsFromAlignment } from "@/lib/studio/sample/words"
+import { listObjects, mediaUrl, storageBytes, storageGet, storageJson, storageMeta, storageUpload, StorageError } from "@/lib/studio/storage"
 
 export type StageOutcome = { done: true; cost?: number; patch?: StagePatch } | { done: false; job: StageJob }
 export type StageContext = { token: string; ref: SampleRef; status: SampleStatus; body: Record<string, unknown> }
@@ -97,4 +99,37 @@ const script: StageWork = async ({ token, ref, body }) => {
   return { done: true, cost, patch: { scriptApproved: file.approved } }
 }
 
-export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script }
+export const MAX_SPEECH_SECONDS = 30
+
+// Clone once per person (the voice id is kept in status.json), then speak the
+// approved script with character timings that become the caption words.
+const voice: StageWork = async ({ token, ref, status }) => {
+  const file = await storageJson<ScriptFile>(token, sampleFile(ref, "script.json"))
+  if (!file.approved) throw new Error("Approve the script first")
+
+  let voiceId = status.voiceId
+  if (!voiceId) {
+    const sample = await storageBytes(token, sampleFile(ref, "voice-sample.wav"))
+    voiceId = await createVoice({
+      name: `studio-${ref.uid}`,
+      description: "Immigration consultant, webcam recording, studio.visaflo.ca",
+      sample,
+      filename: "voice-sample.wav",
+    })
+  }
+
+  const text = file.draft.lines.map((l) => l.tts_text).join("\n\n")
+  const { audio, alignment } = await synthesize(voiceId, text)
+  const words = wordsFromAlignment(alignment, file.draft.lines)
+  const speechSeconds = Math.round((words[words.length - 1]?.end ?? 0) * 100) / 100
+  if (speechSeconds > MAX_SPEECH_SECONDS) {
+    throw new Error(`Speech is ${speechSeconds}s; trim the script under ${MAX_SPEECH_SECONDS}s before making video`)
+  }
+  const assets = {
+    "speech.mp3": await uploadAsset(token, ref, "speech.mp3", audio, "audio/mpeg"),
+    "words.json": await uploadAsset(token, ref, "words.json", JSON.stringify(words), "application/json"),
+  }
+  return { done: true, cost: ttsCost(text.length), patch: { voiceId, speechSeconds, assets } }
+}
+
+export const STAGE_WORK: Partial<Record<Stage, StageWork>> = { prep, script, voice }
