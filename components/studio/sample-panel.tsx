@@ -277,19 +277,6 @@ export function SamplePanel({ submission }: { submission: Submission }) {
                   ["paper", "Paper · red"],
                 ]}
               />
-              {options.method === "real" && (
-                <label className="flex flex-col gap-1">
-                  <span className="text-stone-600">Clip starts at (s)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={170}
-                    className="h-10 border border-stone-950/16 px-3"
-                    defaultValue={options.clipStart}
-                    onBlur={(e) => setOption({ clipStart: Number(e.target.value) })}
-                  />
-                </label>
-              )}
             </div>
 
             {status.stages.prep.state === "done" && options.method !== "real" && (
@@ -448,13 +435,13 @@ export function SamplePanel({ submission }: { submission: Submission }) {
               {status.assets["talking.mp4"] && (
                 <div className="flex flex-col gap-1 text-[13px] text-stone-600">
                   Talking video
-                  <video controls playsInline preload="metadata" src={status.assets["talking.mp4"]} className="max-h-[560px] max-w-full bg-stone-950" />
+                  <video controls playsInline preload="metadata" src={status.assets["talking.mp4"]} className="max-h-[560px] max-w-full self-start bg-stone-950" />
                 </div>
               )}
               {status.assets["final.mp4"] && (
                 <div className="flex flex-col gap-1 text-[13px] text-stone-600">
                   Final
-                  <video controls playsInline preload="metadata" src={status.assets["final.mp4"]} className="max-h-[560px] max-w-full bg-stone-950" />
+                  <video controls playsInline preload="metadata" src={status.assets["final.mp4"]} className="max-h-[560px] max-w-full self-start bg-stone-950" />
                   <a href={status.assets["final.mp4"]} target="_blank" rel="noreferrer" className="underline">
                     Open final.mp4
                   </a>
