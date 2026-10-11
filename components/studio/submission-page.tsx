@@ -5,7 +5,7 @@ import Link from "next/link"
 import type { User } from "firebase/auth"
 
 import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
-import { SamplePanel } from "@/components/studio/sample-panel"
+import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
 import { clipLength, megabytes, when } from "@/lib/studio/admin-format"
@@ -29,8 +29,8 @@ async function requestSubmission(user: User, id: string): Promise<Load> {
   }
 }
 
-// One submission: who they are and what they recorded on top, the sample
-// pipeline below.
+// One submission: who they are, the recording, and a button to save the
+// original file. Sample videos are made by hand from that download.
 export function SubmissionPage({ id }: { id: string }) {
   return (
     <AdminShell path={`/admin/${id}`} wide>
@@ -135,6 +135,11 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
           </dl>
           {s.consent && <p className="m-0 border-l-2 border-stone-200 pl-3 text-[13px] text-stone-600">“{s.consent}”</p>}
           {s.problem && <ErrorText>{s.problem}</ErrorText>}
+          {s.video && (
+            <div>
+              <DownloadRecording user={user} id={s.id} />
+            </div>
+          )}
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-[14px]">
             {s.video && (
               <a href={s.video.url} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
@@ -152,8 +157,6 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
           </div>
         </div>
       </section>
-
-      <SamplePanel submission={s} />
     </>
   )
 }

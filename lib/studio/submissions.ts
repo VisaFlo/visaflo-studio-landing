@@ -16,6 +16,30 @@ type RequestJson = {
 }
 
 const encode = (name: string) => encodeURIComponent(name)
+const SEGMENT = /^[\w-]+$/
+
+// "uid/submissionId" as the admin pages send it. Both halves are single path
+// segments, so nothing can point outside studio/.
+export function parseSubmissionId(id: unknown): { uid: string; submissionId: string } | null {
+  if (typeof id !== "string") return null
+  const parts = id.split("/")
+  if (parts.length !== 2 || !parts.every((p) => SEGMENT.test(p))) return null
+  return { uid: parts[0], submissionId: parts[1] }
+}
+
+// The recording.{mp4,webm} object in a submission folder's listing.
+export function recordingObject(items: string[]): string | undefined {
+  return items.find((name) => /\/recording\.\w+$/.test(name))
+}
+
+// What a downloaded recording is called: the person (name, else email, else
+// uid), the submission, and the recording's own extension.
+export function downloadName(s: { name?: string; email?: string; uid?: string; submissionId: string }, objectName: string): string {
+  const slug = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+  const who = s.name?.trim() ? slug(s.name) : s.email?.trim() ? slug(s.email) : s.uid?.trim() || "recording"
+  const ext = /\.(\w+)$/.exec(objectName)?.[1] ?? "mp4"
+  return `${who}-${s.submissionId}.${ext}`
+}
 
 async function readSubmission(token: string, folder: string, items: string[]): Promise<Submission> {
   const [, uid, submissionId] = folder.split("/")
@@ -26,7 +50,7 @@ async function readSubmission(token: string, folder: string, items: string[]): P
     status: "recorded",
     consoleUrl: consoleUrl(folder),
   }
-  const recording = items.find((name) => /\/recording\.\w+$/.test(name))
+  const recording = recordingObject(items)
   const request = items.find((name) => name.endsWith("/request.json"))
   const problems: string[] = []
 

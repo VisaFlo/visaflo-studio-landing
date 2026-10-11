@@ -1,6 +1,5 @@
 import { requireAdmin } from "@/lib/studio/admin-auth"
-import { parseSampleId } from "@/lib/studio/sample/context"
-import { loadSubmission, loadSubmissions, StorageError } from "@/lib/studio/submissions"
+import { loadSubmission, loadSubmissions, parseSubmissionId, StorageError } from "@/lib/studio/submissions"
 
 // Every face and voice recording with what was submitted alongside it, for
 // /admin — or one of them with ?id=uid/submissionId for its page. Only the
@@ -13,7 +12,7 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id")
   try {
     if (id) {
-      const ref = parseSampleId(id)
+      const ref = parseSubmissionId(id)
       if (!ref) return Response.json({ error: "Unknown submission." }, { status: 400 })
       const submission = await loadSubmission(admin.token, ref.uid, ref.submissionId)
       if (!submission.video && submission.problem?.includes("no recording file")) {

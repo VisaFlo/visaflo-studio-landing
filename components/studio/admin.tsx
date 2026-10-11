@@ -5,6 +5,7 @@ import Link from "next/link"
 import type { User } from "firebase/auth"
 
 import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
+import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
 import { clipLength, submissionHref, when } from "@/lib/studio/admin-format"
@@ -29,7 +30,8 @@ async function requestSubmissions(user: User): Promise<Load> {
   }
 }
 
-// The list. Each row is a link to its own page, where the sample is made.
+// The list. Each row links to its own page (recording, details) and can save
+// the original recording straight from here.
 export function Admin() {
   return <AdminShell path="/admin">{(user) => <AdminList user={user} />}</AdminShell>
 }
@@ -66,12 +68,12 @@ function AdminList({ user }: { user: User }) {
 
       {load.status === "unverified" && <VerifyEmail user={user} onVerified={reload} />}
       {load.status === "error" && <ErrorText>{load.message}</ErrorText>}
-      {load.status === "ready" && <SubmissionTable submissions={load.submissions} />}
+      {load.status === "ready" && <SubmissionTable user={user} submissions={load.submissions} />}
     </>
   )
 }
 
-function SubmissionTable({ submissions }: { submissions: Submission[] }) {
+function SubmissionTable({ user, submissions }: { user: User; submissions: Submission[] }) {
   if (!submissions.length) return <p className="m-0 text-[16px] text-stone-600">No recordings yet.</p>
   const requested = submissions.filter((s) => s.status === "requested").length
   return (
@@ -87,12 +89,15 @@ function SubmissionTable({ submissions }: { submissions: Submission[] }) {
             <th className="py-2 pr-4 font-medium">Who</th>
             <th className="py-2 pr-4 font-medium">Topic</th>
             <th className="py-2 pr-4 font-medium">Length</th>
-            <th className="py-2 font-medium">Flags</th>
+            <th className="py-2 pr-4 font-medium">Flags</th>
+            <th className="py-2 font-medium">
+              <span className="sr-only">Download</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           {submissions.map((s) => (
-            <SubmissionRow key={s.id} submission={s} />
+            <SubmissionRow key={s.id} user={user} submission={s} />
           ))}
         </tbody>
       </table>
@@ -100,7 +105,7 @@ function SubmissionTable({ submissions }: { submissions: Submission[] }) {
   )
 }
 
-function SubmissionRow({ submission: s }: { submission: Submission }) {
+function SubmissionRow({ user, submission: s }: { user: User; submission: Submission }) {
   const flags = s.checks
     ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard"].filter((f): f is string => Boolean(f))
     : []
@@ -128,7 +133,7 @@ function SubmissionRow({ submission: s }: { submission: Submission }) {
           {clipLength(s.seconds)}
         </Link>
       </td>
-      <td className="py-3">
+      <td className="py-3 pr-4">
         <Link href={href} className="flex flex-wrap gap-2">
           {s.status === "recorded" && <Tag tone="muted">Recorded only</Tag>}
           {flags.map((f) => (
@@ -138,6 +143,9 @@ function SubmissionRow({ submission: s }: { submission: Submission }) {
           ))}
           {s.problem && <Tag tone="warn">Read problem</Tag>}
         </Link>
+      </td>
+      <td className="py-2 whitespace-nowrap">
+        {s.video && <DownloadRecording user={user} id={s.id} kind="secondary" className="h-9 px-3 text-[13px]" />}
       </td>
     </tr>
   )

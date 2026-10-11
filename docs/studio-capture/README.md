@@ -33,45 +33,21 @@ and request a sample video.
   (`[VisaFlo Studio] New sample recording`) through the existing SendGrid key.
 
 - **Admin**: `/admin` lists every submission (name, firm, email, topic,
-  checks, consent) with the recording playable in the page, including people
-  who recorded but never picked a topic. Only `bkim@vflo.app` with a verified
-  email gets in (`lib/studio/admin.ts`, and the same email in
-  `storage.rules`). `GET /api/admin/submissions` reads the bucket through the
-  Firebase Storage API with that person's own ID token, so the storage rules
-  decide access and there is still no service account. An unverified admin
-  email gets a "Send verification email" button on the page.
-
-- **Sample pipeline**: on a submission's own page (`/admin/{uid}/{submissionId}`,
-  reached from the `/admin` list), one **Generate** button runs the six
-  steps in order and shows each one's state, time and cost as it goes:
-  Prep (ffmpeg: voice sample + face frames) → Script (the topic's fixed,
-  pre-checked script from `lib/studio/sample/scripts.ts`, already approved)
-  → Voice (ElevenLabs clone + TTS with word timings) → Video (A: own
-  footage + fal lipsync, B: Higgsfield Seedance + lipsync, C: fal OmniHuman)
-  → Audio (ElevenLabs music + SFX) → Render (Remotion Lambda when the
-  `REMOTION_*` keys are set; otherwise the dev server runs
-  `npm run sample:render` on this machine with its Chrome, log in
-  `$TMPDIR/visaflo-render-<uid>-<submissionId>.log`; on Vercel without
-  Lambda it only writes `render-props.json` for someone to run that command
-  by hand). The run stops, with the reason under
-  the button, when a step fails, when method B or C still needs a face
-  frame picked, or when a GPT draft (the "GPT draft" button in the Script
-  card asks GPT-6 Sol for a fresh script from canada.ca) hasn't been
-  approved; "Continue" picks up from there. Once everything is done the
-  button reads "Re-generate" and starts again from Prep (and Script).
-  Each step also has its own Run / Re-run / Retry button; re-running one
-  marks the steps built on it stale. Everything is written to
-  `{submissionId}/sample/`, with `status.json` as the ledger (stage states,
-  job ids, costs). The final cut copies the landing samples' look (Poppins
-  captions that brighten word by word, one card at a time at the top in
-  the topic's palette, full-screen "takeover" stats on marked cards; see
-  the spec's Render section). Redoing Script with unchanged lines keeps the
-  voice, video and audio and only re-renders. Design and prompts:
-  `docs/superpowers/specs/2026-10-09-studio-sample-pipeline-design.md`.
-  Keys: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` (Starter plan or higher for
-  voice cloning), `FAL_KEY`, `HIGGSFIELD_KEY_ID/SECRET`, `REMOTION_*`.
-  `npm run remotion:fixtures && npm run remotion:studio` previews the
-  composition with synthetic media.
+  checks, consent), including people who recorded but never picked a
+  topic. Each row opens its own page (`/admin/{uid}/{submissionId}`) with
+  the recording playable and a **Download recording** button that saves
+  the original file as `{name}-{submissionId}.{mp4|webm}`
+  (`GET /api/admin/recording` streams it through the server, because the
+  bucket serves it inline and a cross-origin link can't force a download).
+  Only `bkim@vflo.app` with a verified email gets in (`lib/studio/admin.ts`,
+  and the same email in `storage.rules`). Both admin routes read the bucket
+  through the Firebase Storage API with that person's own ID token, so the
+  storage rules decide access and there is still no service account. An
+  unverified admin email gets a "Send verification email" button on the
+  page. Sample videos are made by hand from the downloaded recording; the
+  automatic pipeline that used to run from this page was removed on
+  2026-10-10 (the git history before that has it, including the Remotion
+  composition that matched the landing samples' look).
 
 ## Before it works in production
 
