@@ -26,15 +26,17 @@ describe("parseSampleId", () => {
 describe("parseOptions", () => {
   it("keeps current values for anything invalid", () => {
     const current = defaultStatus().options
-    expect(
-      parseOptions({ method: "scene", background: "nope", layout: "full", mood: 3, lipsync: "cheap", faceFrame: 9, clipStart: "20" }, current),
-    ).toEqual({
+    expect(parseOptions({ method: "scene", background: "nope", layout: "full", mood: 3, lipsync: "cheap", faceFrame: 9 }, current)).toEqual({
       ...current,
       method: "scene",
       layout: "full",
-      clipStart: 20,
     })
-    expect(parseOptions({ faceFrame: 4, clipStart: -5, lipsync: "standard" }, current)).toEqual({ ...current, faceFrame: 4, lipsync: "standard" })
+    expect(parseOptions({ faceFrame: 4, lipsync: "standard" }, current)).toEqual({ ...current, faceFrame: 4, lipsync: "standard" })
+  })
+  it("ignores the old clipStart field (the clip always starts two seconds in)", () => {
+    const current = defaultStatus().options
+    expect(parseOptions({ clipStart: 20 }, current)).toEqual(current)
+    expect("clipStart" in current).toBe(false)
   })
 })
 

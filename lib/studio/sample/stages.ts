@@ -163,6 +163,10 @@ export function clipSeconds(speechSeconds: number): number {
   return Math.min(30, Math.ceil(speechSeconds) + 1)
 }
 
+// Method A skips the first beat of the recording (settling after the
+// countdown) and takes the clip from there.
+export const CLIP_START = 2
+
 // A: their own footage, lips re-synced. B: Seedance scene from a face frame,
 // then lips re-synced (the poller chains it). C: OmniHuman from the frame in
 // one step. All three leave the provider job in status.json for the poller.
@@ -170,12 +174,12 @@ const video: StageWork = async ({ token, ref, status }) => {
   const speechUrl = status.assets["speech.mp3"]
   if (!speechUrl || !status.speechSeconds) throw new Error("Run Voice first")
   const seconds = clipSeconds(status.speechSeconds)
-  const { method, faceFrame, clipStart, layout, background, lipsync } = status.options
+  const { method, faceFrame, layout, background, lipsync } = status.options
 
   if (method === "real") {
     const dir = await tmpDir()
     const { file, seconds: recorded } = await downloadRecording(token, ref, dir)
-    const start = Math.max(0, Math.min(clipStart, recorded - seconds))
+    const start = Math.max(0, Math.min(CLIP_START, recorded - seconds))
     const clip = path.join(dir, "clip.mp4")
     await cutClip(file, clip, { start, seconds, crop: layout === "full" })
     const clipUrl = await uploadAsset(token, ref, "clip.mp4", await readFile(clip), "video/mp4")

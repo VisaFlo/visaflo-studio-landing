@@ -20,8 +20,6 @@ export type SampleOptions = {
   lipsync: LipsyncModel
   /** 1–5, which face-N.jpg to use for scene and portrait. */
   faceFrame?: number
-  /** Method real: seconds into the recording where the clip starts. */
-  clipStart: number
 }
 
 export type StageJob = {
@@ -87,7 +85,7 @@ export const TIMEOUT_MINUTES: Record<Stage, number> = {
 export function defaultStatus(): SampleStatus {
   return {
     version: 1,
-    options: { method: "real", background: "office", layout: "full", mood: "calm", palette: "auto", lipsync: "pro", clipStart: 2 },
+    options: { method: "real", background: "office", layout: "full", mood: "calm", palette: "auto", lipsync: "pro" },
     assets: {},
     stages: Object.fromEntries(STAGES.map((s) => [s, { state: "idle" }])) as Record<Stage, StageState>,
   }

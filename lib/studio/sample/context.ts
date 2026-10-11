@@ -60,7 +60,6 @@ function pick<T extends string>(value: unknown, allowed: readonly T[], current: 
 export function parseOptions(value: unknown, current: SampleOptions): SampleOptions {
   const v = (value ?? {}) as Record<string, unknown>
   const faceFrame = Number(v.faceFrame)
-  const clipStart = Number(v.clipStart)
   return {
     method: pick(v.method, METHODS, current.method),
     background: pick(v.background, BACKGROUNDS, current.background),
@@ -69,7 +68,6 @@ export function parseOptions(value: unknown, current: SampleOptions): SampleOpti
     palette: pick(v.palette, PALETTE_CHOICES, current.palette ?? "auto"),
     lipsync: pick(v.lipsync, LIPSYNC, current.lipsync),
     faceFrame: Number.isInteger(faceFrame) && faceFrame >= 1 && faceFrame <= 5 ? faceFrame : current.faceFrame,
-    clipStart: Number.isFinite(clipStart) && clipStart >= 0 && clipStart <= 170 ? clipStart : current.clipStart,
   }
 }
 

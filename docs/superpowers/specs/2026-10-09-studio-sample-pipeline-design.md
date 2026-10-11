@@ -104,7 +104,6 @@ type SampleStatus = {
     layout: "boxed" | "full"                // full (default) = 9:16 like a phone video, boxed = 16:9 clip in a frame
     mood: "calm" | "energetic"
     faceFrame?: number                      // 1–5
-    clipStart?: number                      // A: seconds into the recording, default 2 (recordings start at the script)
   }
   voiceId?: string
   stages: Record<Stage, {
@@ -185,7 +184,8 @@ Generate on, each new status starts the next step.
 - Frames: `-ss {t} -frames:v 1 -q:v 2 face-N.jpg` at 30/45/60/75/90 % of the
   duration. The admin picks the one with the best light and a closed mouth.
 - Method A clip is made at video start, not here, because it depends on the
-  speech length: `-ss {clipStart} -t {ceil(speechSeconds)+1}`; for `layout:
+  speech length: `-ss 2 -t {ceil(speechSeconds)+1}` (two seconds in, past
+  the settling after the countdown; not an option); for `layout:
   full` also `-vf scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920` (cover-fit, a no-op crop for a 9:16 source).
 
 ### 2. Script
