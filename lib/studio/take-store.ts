@@ -16,7 +16,7 @@ export type StoredTake = {
   source: "camera" | "upload"
   startedAt: number
   /** Set when the person pressed Finish (or picked a file); absent if cut off. */
-  finished?: { seconds: number; checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn: boolean } }
+  finished?: { seconds: number; checks?: { faceSeen: boolean; voiceHeard: boolean } }
 }
 
 let opening: Promise<IDBDatabase> | null = null

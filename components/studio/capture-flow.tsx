@@ -6,15 +6,7 @@ import { useRouter } from "next/navigation"
 import { Lightbulb, Monitor, Image as ImageIcon, VolumeX, TriangleAlert } from "lucide-react"
 import type { User } from "firebase/auth"
 
-import {
-  AlignStep,
-  CameraAllowStep,
-  CameraBlockedStep,
-  ReviewStep,
-  ScriptStep,
-  TurnStep,
-  type Pose,
-} from "@/components/studio/capture-steps"
+import { AlignStep, CameraAllowStep, CameraBlockedStep, ReviewStep, ScriptStep } from "@/components/studio/capture-steps"
 import {
   AccountHeader,
   Display,
@@ -29,6 +21,7 @@ import {
 import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
+import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording } from "@/lib/studio/recorder"
 import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
@@ -50,7 +43,6 @@ type Step =
   | "camera"
   | "blocked"
   | "align"
-  | "turn"
   | "script"
   | "review"
   | "topic"
@@ -72,14 +64,17 @@ export function CaptureFlow() {
   const [profile, setProfile] = useState<StudioProfile>({ name: "", firm: "" })
   const [sent, setSent] = useState<SentRequest | null>(null)
 
+  // What gets previewed and recorded: the vertical crop of the camera.
   const [stream, setStream] = useState<MediaStream | null>(null)
-  // Mirror of `stream` for cleanup paths (unmount) that can't rely on state.
+  const portrait = useRef<PortraitStream | null>(null)
+  // The camera itself: the face check reads it, and cleanup paths (unmount)
+  // that can't rely on state use the ref.
+  const [camera, setCamera] = useState<MediaStream | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [cameraBusy, setCameraBusy] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [baseline, setBaseline] = useState<Pose>({ yaw: 0, pitch: 0 })
   const recorder = useRef<ActiveRecorder | null>(null)
-  const turnResult = useRef({ headTurn: false, faceSeen: false })
+  const faceSeen = useRef(false)
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
@@ -142,8 +137,11 @@ export function CaptureFlow() {
   }, [step])
 
   const stopCamera = useCallback(() => {
+    portrait.current?.stop()
+    portrait.current = null
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
+    setCamera(null)
     setStream(null)
   }, [])
 
@@ -158,7 +156,7 @@ export function CaptureFlow() {
 
   // Warn before closing the tab mid-recording or mid-upload.
   useEffect(() => {
-    const busy = step === "turn" || step === "script" || uploadState.status === "uploading" || sending
+    const busy = step === "script" || uploadState.status === "uploading" || sending
     if (!busy) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener("beforeunload", warn)
@@ -172,12 +170,18 @@ export function CaptureFlow() {
     setCameraError(null)
     setCameraBusy(true)
     try {
+      // Biggest frame the camera has in either orientation: a phone held
+      // upright gives portrait, a laptop webcam gives 16:9 and is cropped
+      // to its middle 9:16 column below.
       const media = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+        video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1920 }, frameRate: { ideal: 30 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
       streamRef.current = media
-      setStream(media)
+      setCamera(media)
+      portrait.current?.stop()
+      portrait.current = portraitStream(media)
+      setStream(portrait.current.stream)
       setStep("align")
     } catch (error) {
       const name = error instanceof DOMException ? error.name : ""
@@ -207,12 +211,13 @@ export function CaptureFlow() {
     return startRecording(media, (chunk, index) => void saveChunk(takeId, index, chunk))
   }
 
-  function beginTurn(pose: Pose) {
+  // Framed and lit: recording starts and the script comes up.
+  function beginScript(result: { faceSeen: boolean }) {
     if (!stream) return
-    setBaseline(pose)
+    faceSeen.current = result.faceSeen
     recorder.current?.cancel()
     recorder.current = recordTake(stream)
-    setStep("turn")
+    setStep("script")
   }
 
   function restartRecording() {
@@ -229,7 +234,7 @@ export function CaptureFlow() {
     // Restart was pressed while this clip was finishing: keep the new take.
     if (recorder.current) return
     stopCamera()
-    const checks = { ...turnResult.current, voiceHeard: result.voiceHeard }
+    const checks = { faceSeen: faceSeen.current, voiceHeard: result.voiceHeard }
     if (user) void finishTake(user.uid, { seconds: result.seconds, checks })
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
@@ -404,7 +409,7 @@ export function CaptureFlow() {
 
       {(step === "camera" || step === "blocked") && (
         <>
-          <FlowHeader title="Face and voice" step="Step 1 of 3" onBack={() => setStep("setup")} />
+          <FlowHeader title="Face and voice" step="Step 1 of 2" onBack={() => setStep("setup")} />
           {step === "camera" ? (
             <CameraAllowStep
               unsupported={!recordingSupported}
@@ -418,42 +423,23 @@ export function CaptureFlow() {
         </>
       )}
 
-      {step === "align" && stream && (
+      {step === "align" && stream && camera && (
         <>
-          <FlowHeader title="Face and voice" step="Step 1 of 3" onBack={() => { stopCamera(); setStep("setup") }} />
-          <AlignStep stream={stream} onStart={beginTurn} />
-        </>
-      )}
-
-      {step === "turn" && stream && (
-        <>
-          <FlowHeader title="Face and voice" step="Step 2 of 3" onBack={restartRecording} />
-          <TurnStep
-            stream={stream}
-            baseline={baseline}
-            onStartOver={restartRecording}
-            onDone={(result) => {
-              turnResult.current = result
-              setStep("script")
-            }}
-          />
+          <FlowHeader title="Face and voice" step="Step 1 of 2" onBack={() => { stopCamera(); setStep("setup") }} />
+          <AlignStep stream={stream} camera={camera} onStart={beginScript} />
         </>
       )}
 
       {step === "script" && stream && (
         <>
-          <FlowHeader title="Face and voice" step="Step 3 of 3" onBack={restartRecording} />
+          <FlowHeader title="Face and voice" step="Step 2 of 2" onBack={restartRecording} />
           <ScriptStep
             stream={stream}
             lines={lines}
             speaking={() => recorder.current?.speaking() ?? null}
             level={() => recorder.current?.level() ?? 0}
             onStop={() => void finishRecording()}
-            onRestart={() => {
-              recorder.current?.cancel()
-              recorder.current = recordTake(stream)
-              setStep("turn")
-            }}
+            onRestart={restartRecording}
           />
         </>
       )}
@@ -549,7 +535,7 @@ const TIPS = [
 
 function SetupStep({ firm, onStart, onEditProfile }: { firm: string; onStart: () => void; onEditProfile: () => void }) {
   const rows = [
-    { label: "Face and voice", meta: "About 3 min" },
+    { label: "Face and voice", meta: "About 2 min" },
     { label: "Pick a topic", meta: "This week's IRCC news" },
     { label: "Get your sample", meta: "We email it to you" },
   ]
@@ -569,8 +555,8 @@ function SetupStep({ firm, onStart, onEditProfile }: { firm: string; onStart: ()
           )}
           <Display>Your sample video</Display>
           <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            First we record you: fit your face in a circle, slowly turn your head, then read a short script out
-            loud. It takes about 3 minutes.
+            First we record you, vertical like a phone video: fit your face in the frame, then read a short
+            script out loud. It takes about 2 minutes.
           </p>
         </div>
         <ol className="m-0 flex list-none flex-col border-t border-stone-200 p-0">

@@ -15,11 +15,15 @@ import {
   useStudioUser,
 } from "@/lib/studio/auth"
 import { identify, track } from "@/lib/mixpanel"
+import { returnPath } from "@/lib/studio/return-path"
 import { AccountHeader, Display, ErrorText, Field, Page, PrimaryButton, QuietButton } from "@/components/studio/ui"
 
 type Mode = "sign-in" | "sign-up" | "code" | "reset-sent"
 
-const START = "/start"
+// Admin pages send someone here and get them back after sign-in.
+function afterSignIn(): string {
+  return returnPath(new URLSearchParams(window.location.search).get("next"))
+}
 
 export function SignIn() {
   const router = useRouter()
@@ -34,13 +38,13 @@ export function SignIn() {
 
   // Already signed in (this browser, or VisaFlo's session restored): go on.
   useEffect(() => {
-    if (user && mode !== "code") router.replace(START)
+    if (user && mode !== "code") router.replace(afterSignIn())
   }, [user, mode, router])
 
   function finish(kind: "sign-in" | "sign-up") {
     identify(email.trim().toLowerCase())
     track(kind === "sign-up" ? "studio_sign_up" : "studio_sign_in")
-    router.replace(START)
+    router.replace(afterSignIn())
   }
 
   async function onSubmit(event: FormEvent) {

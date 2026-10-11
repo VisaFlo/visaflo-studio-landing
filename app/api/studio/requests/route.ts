@@ -62,7 +62,6 @@ export async function POST(request: Request) {
         ? {
             faceSeen: rawChecks.faceSeen === true,
             voiceHeard: rawChecks.voiceHeard === true,
-            headTurn: rawChecks.headTurn === true,
           }
         : undefined,
       consentAt,

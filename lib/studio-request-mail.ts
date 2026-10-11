@@ -19,7 +19,7 @@ export type StudioRequestMail = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: "camera" | "upload"
-  checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn: boolean }
+  checks?: { faceSeen: boolean; voiceHeard: boolean }
   consentAt: string
 }
 
@@ -36,7 +36,6 @@ export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<
     ? [
         entry.checks.faceSeen ? "face seen" : "NO FACE SEEN",
         entry.checks.voiceHeard ? "voice heard" : "NO VOICE HEARD",
-        entry.checks.headTurn ? "head turn done" : "head turn skipped",
       ].join(", ")
     : "uploaded file, not checked"
 
