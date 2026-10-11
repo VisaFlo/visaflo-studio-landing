@@ -149,7 +149,8 @@ export const TOPIC_SCRIPTS: Record<string, Script> = {
     cards: [
       { line: 1, label: "New PGP applications", value: "Paused", sub: "Existing files still processed" },
       { line: 2, label: "Another option", value: "Super Visa", sub: "For parents and grandparents" },
-      { line: 3, label: "Super visa stay", value: "5 years", sub: "Per visit · valid for up to 10 years" },
+      { line: 3, label: "Super visa stay", value: "5 years", sub: "Per visit" },
+      { line: 3, label: "Valid for up to", value: "10 years", sub: "Multiple-entry visa" },
     ],
     sources: [
       {
