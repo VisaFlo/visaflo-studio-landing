@@ -16,5 +16,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx eslint .
+      # LayoutProps, RouteContext and the other route type helpers are
+      # generated, not checked in; next dev/build make them locally.
+      - run: npx next typegen
       - run: npx tsc --noEmit -p .
       - run: npm test
