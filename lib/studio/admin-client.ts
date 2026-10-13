@@ -3,34 +3,31 @@
 import { useCallback, useEffect, useState } from "react"
 import type { User } from "firebase/auth"
 
-// How an admin page loads from /api/admin/*: one state machine, one error
-// vocabulary, and a `reload` that really re-requests (needed after "I've
-// verified it", because `user.reload()` changes the same User in place and
-// no effect dependency moves).
+import { UNVERIFIED_CODE } from "@/lib/studio/admin"
+import { describeLoadError } from "@/lib/studio/errors"
+
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "unverified" } | { status: "error"; message: string }
-
-const NO_CONNECTION = "No connection. Check your internet, then reload."
-const DEAD_SESSION = "Your session is no longer valid. Sign out and sign in again."
-
-// Firebase auth errors carry a code; fetch failures are TypeErrors. Only a
-// network problem is fixed by reloading, so say which it was.
-export function describeLoadError(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code
-  if (code === "auth/network-request-failed" || error instanceof TypeError) return NO_CONNECTION
-  if (code === "auth/user-token-expired" || code === "auth/user-disabled" || code === "auth/invalid-user-token") return DEAD_SESSION
-  const what = typeof code === "string" ? code : error instanceof Error ? error.message : ""
-  return what ? `Something went wrong (${what}). Reload to try again.` : "Something went wrong. Reload to try again."
-}
 
 type Body = Record<string, unknown> & { error?: string; code?: string }
 
-export async function adminRequest<T>(user: User, path: string, pick: (body: Body) => T | undefined): Promise<Load<T>> {
+type AdminPath = `/api/admin/${string}`
+
+// One request to /api/admin/*, turned into a Load state. The body is read as
+// text first so a non-JSON answer (a gateway's HTML timeout page) is logged
+// with its status instead of vanishing into a parse error.
+export async function adminRequest<T>(user: User, path: AdminPath, pick: (body: Body) => T | undefined): Promise<Load<T>> {
   try {
     // A fresh token, so a just-verified email counts right away.
     const token = await user.getIdToken(true)
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } })
-    const body = (await response.json().catch(() => ({}))) as Body
-    if (body.code === "unverified") return { status: "unverified" }
+    const raw = await response.text()
+    let body: Body = {}
+    try {
+      body = JSON.parse(raw) as Body
+    } catch {
+      console.error(`${path} answered with something other than JSON`, response.status, raw.slice(0, 300))
+    }
+    if (body.code === UNVERIFIED_CODE) return { status: "unverified" }
     const data = response.ok ? pick(body) : undefined
     if (data === undefined) {
       return { status: "error", message: typeof body.error === "string" ? body.error : `Request failed (${response.status}). Reload to try again.` }
@@ -42,8 +39,13 @@ export async function adminRequest<T>(user: User, path: string, pick: (body: Bod
   }
 }
 
-// `pick` must be stable (declare it at module level): it is an effect dependency.
-export function useAdminLoad<T>(user: User, path: string, pick: (body: Body) => T | undefined): { load: Load<T>; reload: () => void } {
+// How an admin page loads: one state machine, one error vocabulary, and a
+// `reload` that really re-requests. That matters after "I've verified it":
+// `user.reload()` changes the same User object in place, so no effect
+// dependency moves and only the attempt counter can trigger a new request.
+// `pick` must be stable (declare it at module level): it is an effect
+// dependency, and an inline arrow would re-request on every render, forever.
+export function useAdminLoad<T>(user: User, path: AdminPath, pick: (body: Body) => T | undefined): { load: Load<T>; reload: () => void } {
   const [load, setLoad] = useState<Load<T>>({ status: "loading" })
   const [attempt, setAttempt] = useState(0)
 

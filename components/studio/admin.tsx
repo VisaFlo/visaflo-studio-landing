@@ -8,7 +8,7 @@ import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
 import { useAdminLoad } from "@/lib/studio/admin-client"
-import { clipLength, submissionHref, when } from "@/lib/studio/admin-format"
+import { clipLength, describeProblems, submissionHref, when } from "@/lib/studio/admin-format"
 import { checkFlags } from "@/lib/studio/checks"
 
 const pickSubmissions = (body: Record<string, unknown>) => (Array.isArray(body.submissions) ? (body.submissions as Submission[]) : undefined)
@@ -48,7 +48,7 @@ function SubmissionTable({ user, submissions }: { user: User; submissions: Submi
     <div className="flex flex-col gap-3">
       <p className="m-0 text-[14px] text-stone-600">
         {submissions.length} recording{submissions.length === 1 ? "" : "s"} · {requested} with a topic picked · {submissions.length - requested}{" "}
-        recorded only
+        without
       </p>
       <table className="w-full border-collapse text-[14px]">
         <thead>
@@ -73,9 +73,14 @@ function SubmissionTable({ user, submissions }: { user: User; submissions: Submi
   )
 }
 
+// What the Topic cell says when there is no topic.
+export function topicFallback(status: Submission["status"]): string {
+  return status === "request-unreadable" ? "Couldn't read request.json" : "No topic picked yet"
+}
+
 function SubmissionRow({ user, submission: s }: { user: User; submission: Submission }) {
-  const flags = checkFlags(s.checks)
-  const requestUnreadable = s.problems.some((p) => p.kind === "request-unreadable")
+  // Checks travel in request.json, so only a finished request can be missing them.
+  const flags = s.status === "requested" ? checkFlags(s.checks) : []
   const href = submissionHref(s.id)
   return (
     <tr className="border-b border-stone-200 hover:bg-stone-50">
@@ -92,12 +97,9 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
       </td>
       <td className="max-w-[280px] py-3 pr-4">
         <Link href={href} className="block truncate">
-          {s.topicTitle ??
-            (requestUnreadable ? (
-              <span className="text-[#9a3412]">Couldn&apos;t read request.json</span>
-            ) : (
-              <span className="text-stone-500">No topic picked yet</span>
-            ))}
+          {s.topicTitle ?? (
+            <span className={s.status === "request-unreadable" ? "text-[#9a3412]" : "text-stone-500"}>{topicFallback(s.status)}</span>
+          )}
         </Link>
       </td>
       <td className="py-3 pr-4 whitespace-nowrap text-stone-600">
@@ -107,17 +109,21 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
       </td>
       <td className="py-3 pr-4">
         <Link href={href} className="flex flex-wrap gap-2">
-          {s.status === "recorded" && !requestUnreadable && <Tag tone="muted">Recorded only</Tag>}
+          {s.status === "recorded" && <Tag tone="muted">Recorded only</Tag>}
           {flags.map((f) => (
             <Tag key={f} tone="warn">
               {f}
             </Tag>
           ))}
-          {s.problems.length > 0 && <Tag tone="warn">Read problem</Tag>}
+          {s.problems.length > 0 && (
+            <Tag tone="warn" title={describeProblems(s.problems)}>
+              Read problem
+            </Tag>
+          )}
         </Link>
       </td>
       <td className="py-2 whitespace-nowrap">
-        {s.video && <DownloadRecording user={user} id={s.id} kind="secondary" className="h-9 px-3 text-[13px]" />}
+        {s.recording && <DownloadRecording user={user} id={s.id} kind="secondary" className="h-9 px-3 text-[13px]" />}
       </td>
     </tr>
   )

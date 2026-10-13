@@ -33,18 +33,22 @@ export async function verifyIdToken(token: string): Promise<VerifiedUser> {
   }
 }
 
-export type VerifyFailure = { status: number; message: string }
+// What a failed verifyIdToken was, and what to answer. Only "expired" is the
+// person's to fix by signing in again (and the one kind not worth a log line);
+// "unreachable" means Google's key set couldn't be fetched, which is ours;
+// "invalid" (bad signature, wrong project) is a token to discard.
+export type VerifyFailure =
+  | { kind: "expired"; status: 401; message: string }
+  | { kind: "unreachable"; status: 503; message: string }
+  | { kind: "invalid"; status: 401; message: string }
 
-// What to answer when a token doesn't verify. Only an expired token is the
-// person's to fix by signing in again; not reaching Google's key set is ours,
-// and anything else (bad signature, wrong project) is a token to discard.
 export function verifyFailure(error: unknown): VerifyFailure {
   const code = (error as { code?: unknown } | null)?.code
-  if (code === "ERR_JWT_EXPIRED") return { status: 401, message: "Your sign-in expired. Sign in again, then retry." }
+  if (code === "ERR_JWT_EXPIRED") return { kind: "expired", status: 401, message: "Your sign-in expired. Sign in again, then retry." }
   if ((typeof code === "string" && code.startsWith("ERR_JWKS")) || error instanceof TypeError) {
-    return { status: 503, message: "We couldn't verify your sign-in right now. Try again in a minute." }
+    return { kind: "unreachable", status: 503, message: "We couldn't verify your sign-in right now. Try again in a minute." }
   }
-  return { status: 401, message: "We couldn't verify your sign-in. Sign out and sign in again." }
+  return { kind: "invalid", status: 401, message: "We couldn't verify your sign-in. Sign out and sign in again." }
 }
 
 export function bearerToken(request: Request): string | null {

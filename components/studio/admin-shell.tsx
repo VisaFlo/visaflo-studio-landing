@@ -23,17 +23,20 @@ export function AdminShell({
 }) {
   const router = useRouter()
   const user = useStudioUser()
+  const [signOutError, setSignOutError] = useState<string | null>(null)
 
   useEffect(() => {
     if (user === null) router.replace(`/signin?next=${encodeURIComponent(path)}`)
   }, [user, router, path])
 
   async function signOut() {
+    setSignOutError(null)
     try {
       await signOutOfStudio()
     } catch (error) {
-      // Still signed in; the next page load would just bounce back here.
+      // Still signed in: say so, or the button looks broken.
       console.error("Sign-out failed", error)
+      setSignOutError("We couldn't sign you out. Reload the page and try again.")
       return
     }
     router.replace(`/signin?next=${encodeURIComponent(path)}`)
@@ -49,7 +52,16 @@ export function AdminShell({
   }
 
   const email = user.email ?? ""
-  const header = <AccountHeader email={email} initials={initials("", email)} onSignOut={() => void signOut()} />
+  const header = (
+    <>
+      <AccountHeader email={email} initials={initials("", email)} onSignOut={() => void signOut()} />
+      {signOutError && (
+        <div className="mx-auto w-full max-w-[1400px] px-(--page-pad) pt-3">
+          <ErrorText>{signOutError}</ErrorText>
+        </div>
+      )}
+    </>
+  )
 
   if (!isStudioAdmin(user.email)) {
     return (
@@ -134,7 +146,11 @@ export function VerifyEmail({ user, onVerified }: { user: User; onVerified: () =
   )
 }
 
-export function Tag({ tone, children }: { tone: "muted" | "warn" | "ok"; children: string }) {
+export function Tag({ tone, title, children }: { tone: "muted" | "warn" | "ok"; title?: string; children: string }) {
   const color = tone === "warn" ? "bg-[#fff1e6] text-[#9a3412]" : tone === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-stone-100 text-stone-600"
-  return <span className={`px-2 py-0.5 text-[12px] font-medium whitespace-nowrap ${color}`}>{children}</span>
+  return (
+    <span title={title} className={`px-2 py-0.5 text-[12px] font-medium whitespace-nowrap ${color}`}>
+      {children}
+    </span>
+  )
 }

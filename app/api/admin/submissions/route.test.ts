@@ -31,7 +31,10 @@ describe("GET /api/admin/submissions", () => {
   })
 
   it("returns one submission with its problems rather than hiding it", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } }, media: { "studio/u1/s1/request.json": { name: "Dan" } } })
+    fakeBucket({
+      listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } },
+      media: { "studio/u1/s1/request.json": { name: "Dan", topicTitle: "Family" } },
+    })
     const response = await get("?id=u1/s1")
     expect(response.status).toBe(200)
     const body = (await response.json()) as { submission: { name: string; problems: { kind: string }[] } }
@@ -52,5 +55,12 @@ describe("GET /api/admin/submissions", () => {
     expect(((await refused.json()) as { error: string }).error).toContain("storage.rules")
     fakeBucket({ listings: { "studio/": 401 } })
     expect((await get()).status).toBe(401)
+  })
+
+  it("passes the admin gate's own response through without touching Storage", async () => {
+    admin.mockResolvedValue(Response.json({ error: "no" }, { status: 403 }))
+    const fetch = fakeBucket({ listings: { "studio/": { prefixes: [] } } })
+    expect((await get()).status).toBe(403)
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

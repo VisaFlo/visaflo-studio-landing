@@ -64,6 +64,9 @@ export type SampleRequest = {
   consentAt: string
 }
 
+/** What /api/studio/requests answered: a message written for the person, unlike an SDK or fetch error. */
+export class ApiError extends Error {}
+
 // The request is kept next to the recording (so the bucket alone has the full
 // record) and sent to the team inbox through our API.
 export async function submitSampleRequest(user: User, request: SampleRequest): Promise<void> {
@@ -81,7 +84,7 @@ export async function submitSampleRequest(user: User, request: SampleRequest): P
   })
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(body.error ?? `Request failed (${response.status})`)
+    throw new ApiError(body.error ?? `Request failed (${response.status}). Try again.`)
   }
 }
 

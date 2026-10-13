@@ -1,12 +1,10 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
 import { parseChecks } from "@/lib/studio/checks"
+import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
+import { isoDate, LIMITS, text } from "@/lib/studio/request-json"
 import { bearerToken, verifyFailure, verifyIdToken } from "@/lib/studio/verify-id-token"
 
-const MAX_TEXT = 200
-
-function text(value: unknown, max = MAX_TEXT): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : ""
-}
+const RECORDING_FILE = new RegExp(`^recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
 
 // A signed-in person finished recording and picked a topic. The files are
 // already in the bucket; this tells the team. The uid comes from the verified
@@ -20,7 +18,7 @@ export async function POST(request: Request) {
     user = await verifyIdToken(token)
   } catch (error) {
     const failure = verifyFailure(error)
-    if ((error as { code?: string }).code !== "ERR_JWT_EXPIRED") console.error("verifyIdToken failed", error)
+    if (failure.kind !== "expired") console.error("verifyIdToken failed", error)
     return Response.json({ error: failure.message }, { status: failure.status })
   }
 
@@ -31,35 +29,30 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
 
-  const submissionId = text(body.submissionId, 64)
-  const recordingPath = text(body.recordingPath, 300)
+  const submissionId = text(body.submissionId, LIMITS.submissionId) ?? ""
+  const recordingPath = text(body.recordingPath, LIMITS.recordingPath) ?? ""
   const folder = `studio/${user.uid}/${submissionId}/`
-  const validPath =
-    /^[\w-]+$/.test(submissionId) &&
-    recordingPath.startsWith(folder) &&
-    /^recording\.(mp4|webm|mov|m4v)$/.test(recordingPath.slice(folder.length))
+  const validPath = /^[\w-]+$/.test(submissionId) && recordingPath.startsWith(folder) && RECORDING_FILE.test(recordingPath.slice(folder.length))
   if (!validPath) {
     return Response.json({ error: "That recording doesn't belong to this account." }, { status: 400 })
   }
-  const topicTitle = text(body.topicTitle, 500)
+  const topicTitle = text(body.topicTitle, LIMITS.topicTitle)
   if (!topicTitle) return Response.json({ error: "Pick a topic first." }, { status: 400 })
-  const consentAt = text(body.consentAt, 40)
-  if (!consentAt || Number.isNaN(Date.parse(consentAt))) {
-    return Response.json({ error: "Agree to the consent first." }, { status: 400 })
-  }
+  const consentAt = isoDate(body.consentAt)
+  if (!consentAt) return Response.json({ error: "Agree to the consent first." }, { status: 400 })
 
   try {
     await sendStudioRequestEmail({
       uid: user.uid,
-      email: user.email ?? "unknown",
+      email: user.email,
       emailVerified: user.emailVerified,
-      name: text(body.name),
-      firm: text(body.firm),
+      name: text(body.name) ?? "",
+      firm: text(body.firm) ?? "",
       topicTitle,
       submissionId,
       recordingPath,
       recordingSeconds: Math.max(0, Math.round(Number(body.recordingSeconds) || 0)),
-      recordingSource: body.recordingSource === "upload" ? "upload" : "camera",
+      recordingSource: "camera",
       checks: parseChecks(body.checks),
       consentAt,
     })

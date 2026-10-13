@@ -15,10 +15,10 @@ export type StoredTake = {
   uid: string
   takeId: string
   mime: string
-  source: "camera" | "upload"
+  source: "camera"
   startedAt: number
-  /** Set when the person pressed Finish; absent if the take was cut off. */
-  finished?: { seconds: number; checks?: RecordingChecks }
+  /** Set when the person pressed Finish; absent if the take was cut off (then nothing was measured). */
+  finished?: { seconds: number; checks: RecordingChecks }
 }
 
 let opening: Promise<IDBDatabase> | null = null

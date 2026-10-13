@@ -24,7 +24,10 @@ export function loadFaceLandmarker(): Promise<FaceLandmarker> {
       })
     try {
       return await create("GPU")
-    } catch {
+    } catch (error) {
+      // CPU is slower and warmer, and more likely to miss frames; worth knowing
+      // when a device's recordings keep saying the check didn't run.
+      console.warn("Face landmarker GPU delegate failed, using CPU", error)
       return await create("CPU")
     }
   })()
@@ -59,9 +62,10 @@ export type FaceGeometry = {
 // Where the landmarks' bounding box sits in the mirrored portrait preview.
 // The preview is the portrait crop of the camera (the whole frame when the
 // camera is already portrait), so positions are measured within that crop,
-// and x flips because the preview is mirrored. Pure, so it is tested
-// without a browser.
-export function faceGeometry(points: { x: number; y: number }[], vw: number, vh: number): FaceGeometry {
+// and x flips because the preview is mirrored. Null without landmarks (no
+// NaN). Pure, so it is tested without a browser.
+export function faceGeometry(points: { x: number; y: number }[], vw: number, vh: number): FaceGeometry | null {
+  if (!points.length) return null
   const crop = portraitCrop(vw, vh)
   let minX = Infinity
   let maxX = -Infinity
@@ -81,10 +85,16 @@ export function faceGeometry(points: { x: number; y: number }[], vw: number, vh:
   }
 }
 
-let sampler: CanvasRenderingContext2D | null = null
+let sampler: CanvasRenderingContext2D | null | undefined
 
+// Mean brightness of the face box. The result only drives the live "Light"
+// hint while framing (it is not recorded anywhere), so without a 2D context
+// it reads as lit, once logged, rather than blocking the person.
 function faceBrightness(video: HTMLVideoElement, box: FaceGeometry["box"]): number {
-  sampler ??= document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  if (sampler === undefined) {
+    sampler = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+    if (!sampler) console.warn("Canvas 2D is unavailable; the light check is skipped")
+  }
   if (!sampler) return 255
   const side = 24
   sampler.canvas.width = side
@@ -98,9 +108,9 @@ function faceBrightness(video: HTMLVideoElement, box: FaceGeometry["box"]): numb
 
 export function readFace(landmarker: FaceLandmarker, video: HTMLVideoElement, at: number): FaceFrame {
   const result = landmarker.detectForVideo(video, at)
-  const points = result.faceLandmarks[0]
-  if (!points) return { found: false }
-  const { cx, cy, size, box } = faceGeometry(points, video.videoWidth, video.videoHeight)
+  const geometry = faceGeometry(result.faceLandmarks[0] ?? [], video.videoWidth, video.videoHeight)
+  if (!geometry) return { found: false }
+  const { cx, cy, size, box } = geometry
   return { found: true, cx, cy, size, light: faceBrightness(video, box) }
 }
 
@@ -108,8 +118,9 @@ export type AlignCheck = { inFrame: boolean; distance: "ok" | "closer" | "back";
 
 // Where the face should sit in the vertical frame: centred, a little above
 // the middle (like a phone selfie), filling roughly a third to three fifths
-// of the width, with enough light on it. The dashed oval the person sees is
-// drawn from the same numbers (camera-frame.tsx), so guide and check agree.
+// of the width, with enough light on it. The dashed oval the person sees
+// (camera-frame.tsx) shares its centre with the check; its radii are a
+// visual target tuned to match the size range, not derived from it.
 export const GUIDE = {
   cx: 0.5,
   cy: 0.4,

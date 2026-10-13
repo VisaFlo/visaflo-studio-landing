@@ -19,8 +19,23 @@ describe("firstDownloadToken", () => {
   })
 })
 
+describe("StorageError", () => {
+  it("knows a refused read (token or rules) from any other failure", () => {
+    expect(new StorageError(401, "x").refused).toBe(true)
+    expect(new StorageError(403, "x").refused).toBe(true)
+    expect(new StorageError(404, "x").refused).toBe(false)
+    expect(new StorageError(500, "x").refused).toBe(false)
+  })
+})
+
 describe("listObjects", () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it("reads with the caller's token as a Firebase header and never from a cache", async () => {
+    const fetch = fakeBucket({ listings: { "studio/": {} } })
+    await listObjects("the-token", "studio/")
+    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Firebase the-token" }, cache: "no-store" })
+  })
 
   it("follows nextPageToken so a long folder isn't cut off at one page", async () => {
     const fetch = fakeBucket({

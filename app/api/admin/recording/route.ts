@@ -1,7 +1,8 @@
 import { requireAdmin } from "@/lib/studio/admin-auth"
 import { storageFailure } from "@/lib/studio/admin-errors"
+import { readRequestJson, type RequestJson } from "@/lib/studio/request-json"
 import { listObjects, storageGet, storageJson, StorageError } from "@/lib/studio/storage"
-import { downloadName, parseSubmissionId, readRequestJson, recordingObject, submissionFolder, type RequestJson } from "@/lib/studio/submissions"
+import { downloadName, parseSubmissionId, recordingObject, submissionFolder } from "@/lib/studio/submissions"
 
 // One submission's original recording as a file download
 // (?id=uid/submissionId). The bytes stream through here because the bucket
@@ -14,6 +15,7 @@ export async function GET(request: Request) {
   const ref = parseSubmissionId(new URL(request.url).searchParams.get("id"))
   if (!ref) return Response.json({ error: "Unknown submission." }, { status: 400 })
   const folder = submissionFolder(ref)
+  const who = `${ref.uid}/${ref.submissionId}`
 
   try {
     const { items } = await listObjects(admin.token, `${folder}/`)
@@ -26,22 +28,29 @@ export async function GET(request: Request) {
     const details = await storageJson<unknown>(admin.token, `${folder}/request.json`)
       .then(readRequestJson)
       .catch((error: unknown): RequestJson => {
-        if (error instanceof StorageError && (error.status === 401 || error.status === 403)) throw error
-        if (!(error instanceof StorageError && error.status === 404)) console.error(`Could not read request.json for ${ref.uid}/${ref.submissionId}`, error)
+        if (error instanceof StorageError && error.refused) throw error
+        if (!(error instanceof StorageError && error.status === 404)) console.error(`Could not read request.json for ${who}`, error)
         return {}
       })
 
     const media = await storageGet(admin.token, `/${encodeURIComponent(recording)}?alt=media`)
     const headers = new Headers({
       "Content-Type": media.headers.get("content-type") ?? "video/mp4",
-      "Content-Disposition": `attachment; filename="${downloadName({ ...details, uid: ref.uid, submissionId: ref.submissionId }, recording)}"`,
+      "Content-Disposition": `attachment; filename="${downloadName(details, ref, recording)}"`,
       "Cache-Control": "private, no-store",
     })
     const length = media.headers.get("content-length")
     if (length) headers.set("Content-Length", length)
-    return new Response(media.body, { headers })
+
+    // The body is handed back before it is consumed, so the catch below
+    // never sees a stream that breaks mid-way; pipe it through a pass-through
+    // whose failure is logged with the submission. The reader still sees the
+    // error (and a short file fails the Content-Length check).
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+    void media.body?.pipeTo(writable).catch((error: unknown) => console.error(`Streaming the recording for ${who} failed`, error))
+    return new Response(media.body ? readable : null, { headers })
   } catch (error) {
-    console.error(`Failed to download the recording for ${ref.uid}/${ref.submissionId}`, error)
+    console.error(`Failed to download the recording for ${who}`, error)
     return storageFailure(error) ?? Response.json({ error: "We couldn't download the recording. Try again." }, { status: 500 })
   }
 }

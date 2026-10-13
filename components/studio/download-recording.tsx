@@ -4,7 +4,7 @@ import { useState } from "react"
 import type { User } from "firebase/auth"
 
 import { ErrorText, PrimaryButton, SecondaryButton } from "@/components/studio/ui"
-import { describeLoadError } from "@/lib/studio/admin-client"
+import { describeLoadError } from "@/lib/studio/errors"
 
 // What the API said, as opposed to a connection or sign-in failure.
 class ServerError extends Error {}
@@ -18,8 +18,14 @@ async function fetchRecording(user: User, id: string): Promise<{ blob: Blob; fil
   const token = await user.getIdToken()
   const response = await fetch(`/api/admin/recording?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } })
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new ServerError(body.error ?? `Download failed (${response.status}).`)
+    const raw = await response.text()
+    let message: string | undefined
+    try {
+      message = (JSON.parse(raw) as { error?: string }).error
+    } catch {
+      console.error("/api/admin/recording answered with something other than JSON", response.status, raw.slice(0, 300))
+    }
+    throw new ServerError(message ?? `Download failed (${response.status}).`)
   }
   const filename = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1] ?? "recording.mp4"
   return { blob: await response.blob(), filename }

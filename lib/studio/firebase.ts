@@ -16,7 +16,6 @@ const config = {
   apiKey: "AIzaSyAUeWHyep0uBj6NPMU9Av0Rn9uoM4Ohq5s",
   authDomain: `${PROJECT_ID}.firebaseapp.com`,
   projectId: PROJECT_ID,
-  // Canada-region bucket and database, the ones VisaFlo moved to in 2026-09.
   storageBucket: BUCKET,
   messagingSenderId: "1051689408312",
   appId: "1:1051689408312:web:e812d0a48a87ddd62593cd",

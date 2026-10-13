@@ -34,7 +34,8 @@ and request a sample video.
 
 - **Admin**: `/admin` lists every submission (when, who, topic, length,
   check flags), including people who recorded but never picked a topic,
-  with a **Download recording** button on each row. A row opens its own
+  with a **Download recording** button on each row that has a recording
+  (the download needs no download token, only the admin's token). A row opens its own
   page (`/admin/{uid}/{submissionId}`) with the recording playable, the
   consent text, and the same download. The file is saved as
   `{name-or-email-or-uid}-{submissionId}.{ext}` (`GET /api/admin/recording`

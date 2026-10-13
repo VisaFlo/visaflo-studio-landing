@@ -211,8 +211,10 @@ function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint
 
 const COUNTDOWN_SECONDS = 3
 
-// Keeps the face check running, off-screen, while the script is read, so the
-// review and the team can tell whether the face stayed in frame. The flow
+// Keeps the face detector running, off-screen, while the script is read, so
+// the review and the team can tell whether a face was in the camera's view
+// while recording. It is a found/not-found tally on the raw camera frame
+// (wider than the recorded crop on a laptop), not the oval check. The flow
 // tallies the readings; no readings at all means the tracker never ran.
 export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (frame: FaceFrame) => void }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
@@ -222,9 +224,10 @@ export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (
 
 // `stream` is the vertical crop the person sees and records; `camera` is the
 // raw camera it was cut from. The face check reads the raw camera, not
-// `stream`: MediaPipe's detectForVideo throws on a canvas-captured stream.
-// readFace measures inside the same 9:16 crop, so the oval check matches
-// the preview.
+// `stream`: MediaPipe's detectForVideo threw on the canvas-captured stream
+// (Chrome on macOS, @mediapipe/tasks-vision 1.1; see commit c5270eb). If a
+// later version accepts it, this indirection can go. readFace measures
+// inside the same 9:16 crop, so the oval check matches the preview.
 export function AlignStep({
   stream,
   camera,
@@ -292,7 +295,8 @@ export function AlignStep({
       // Without live tracking there is no reading: "not checked", not "seen".
       onStart({ faceSeen: status === "ready" ? faceSeen.current : null })
     } catch (error) {
-      // Let the button work again if starting the recorder threw.
+      // Defensive: the flow's onStart handles its own failures today, but if
+      // it ever throws, the button must work again rather than stay dead.
       started.current = false
       throw error
     }
@@ -687,8 +691,8 @@ export function ScriptStep({
   )
 }
 
-// ok: true passed, false failed, null never checked (shown neutrally).
-function Chip({ ok, children }: { ok: boolean | null; children: ReactNode }) {
+// A Check as a chip: passed, failed, or never checked (shown neutrally).
+function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
   return (
     <li
       className={cn(
@@ -724,7 +728,7 @@ export function ReviewStep({
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const checks = recording.checks
-  const short = recording.source === "camera" && recording.seconds < 45
+  const short = recording.seconds < 45
   // A check that never ran isn't a complaint.
   const allGood = !checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short)
 
@@ -737,7 +741,7 @@ export function ReviewStep({
           playsInline
           controls={playing}
           onPlay={() => setPlaying(true)}
-          className={cn("size-full object-cover", recording.source === "camera" && !playing && "-scale-x-100")}
+          className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
         {!playing && (
           <button
@@ -763,7 +767,7 @@ export function ReviewStep({
             {notice}
           </p>
         )}
-        {checks ? (
+        {checks && (
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
             <Chip ok={checks.faceSeen}>
               {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}
@@ -773,10 +777,6 @@ export function ReviewStep({
             </Chip>
             {short && <Chip ok={false}>Short. Aim for a minute</Chip>}
           </ul>
-        ) : notice ? null : (
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            Use a clip where you face the camera and talk for about a minute in a quiet room.
-          </p>
         )}
         <label
           className={cn(

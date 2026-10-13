@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils"
 
 // The vertical camera preview, phone-shaped, with a dashed oval where the
 // face should sit. For a landscape webcam this is exactly the 9:16 crop that
-// gets recorded; a phone camera's own portrait frame is shown object-fit:
-// cover, so anything beyond 9:16 is recorded but not previewed.
+// gets recorded (unless the camera reported no frame size and the full frame
+// is recorded, see portrait.ts); a phone camera's own portrait frame is shown
+// object-fit: cover, so anything beyond 9:16 is recorded but not previewed.
 export function PortraitFrame({
   stream,
   dim,
@@ -64,7 +65,13 @@ export function CameraVideo({
     const el = video.current
     if (!el) return
     el.srcObject = stream
-    if (stream) void el.play().catch(() => {})
+    // AbortError is the stream changing before play() settled; anything else
+    // is a black preview worth a trace.
+    if (stream) {
+      void el.play().catch((error: unknown) => {
+        if ((error as { name?: string } | null)?.name !== "AbortError") console.warn("Camera preview wouldn't play", error)
+      })
+    }
     onVideo?.(el)
     return () => onVideo?.(null)
   }, [stream, onVideo])

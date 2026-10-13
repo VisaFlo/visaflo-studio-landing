@@ -49,15 +49,19 @@ describe("faceGeometry", () => {
     const g = faceGeometry(points(0.4, 0.5), 1920, 1080)
     // Crop is x 656..1264 (608 wide); the face centre at 864 px is 208 px in,
     // which mirrors to the right-hand side of the preview.
-    expect(g.cx).toBeCloseTo(1 - 208 / 608, 3)
-    expect(g.cy).toBeCloseTo(0.4, 5)
-    expect(g.size).toBeCloseTo(192 / 608, 3)
-    expect(g.box).toEqual({ x: 768, y: 432, w: 192, h: 0 })
+    expect(g?.cx).toBeCloseTo(1 - 208 / 608, 3)
+    expect(g?.cy).toBeCloseTo(0.4, 5)
+    expect(g?.size).toBeCloseTo(192 / 608, 3)
+    expect(g?.box).toEqual({ x: 768, y: 432, w: 192, h: 0 })
   })
 
   it("uses the whole frame for a portrait camera", () => {
     const g = faceGeometry(points(0.4, 0.5), 1080, 1920)
-    expect(g.cx).toBeCloseTo(1 - 0.45, 5)
-    expect(g.size).toBeCloseTo(0.1, 5)
+    expect(g?.cx).toBeCloseTo(1 - 0.45, 5)
+    expect(g?.size).toBeCloseTo(0.1, 5)
+  })
+
+  it("has nothing to say about no landmarks, rather than NaN", () => {
+    expect(faceGeometry([], 1920, 1080)).toBeNull()
   })
 })

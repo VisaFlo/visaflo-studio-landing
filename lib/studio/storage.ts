@@ -1,9 +1,7 @@
 // Firebase Storage over REST with the caller's own ID token: the storage
 // rules decide what each token may read, so no service account is needed on
-// Vercel. Used by the submissions list and page and the recording download.
+// Vercel.
 import { BUCKET, PROJECT_ID } from "@/lib/studio/project"
-
-export { BUCKET, PROJECT_ID }
 
 // Local QA: the same Storage emulator the browser uploads to (see
 // docs/studio-capture/README.md).
@@ -23,6 +21,11 @@ export class StorageError extends Error {
     super(`Storage responded ${status}: ${detail.slice(0, 300)}`)
     this.name = "StorageError"
   }
+
+  /** The token or the rules said no: about the caller, not about this one object. */
+  get refused(): boolean {
+    return this.status === 401 || this.status === 403
+  }
 }
 
 export type ObjectMeta = {
@@ -32,6 +35,7 @@ export type ObjectMeta = {
   timeCreated?: string
   /** Comma-joined; any one of them opens the file through mediaUrl. */
   downloadTokens?: string
+  /** Custom metadata the uploader's browser set (lib/studio/upload.ts): read it as carefully as request.json. */
   metadata?: Record<string, string>
 }
 

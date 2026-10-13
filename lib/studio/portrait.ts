@@ -1,9 +1,10 @@
 "use client"
 
 // The sample video VisaFlo edits from this recording is a vertical short, so
-// the recording is vertical from the start. A phone held upright already
-// gives 9:16; a laptop webcam gives 16:9, and we keep only its middle 9:16
-// column (the preview shows exactly that, so people frame themselves for it).
+// the recording is vertical from the start. A phone held upright is recorded
+// in its own portrait frame (often taller than 9:16); a laptop webcam gives
+// 16:9, and we keep only its middle 9:16 column (the preview shows exactly
+// that, so people frame themselves for it).
 
 export type Crop = { x: number; y: number; w: number; h: number }
 
@@ -35,7 +36,7 @@ export function portraitStream(source: MediaStream): PortraitStream {
   }
   if (height >= width) return { stream: source, stop: () => {} }
 
-  const crop = portraitCrop(width, height)
+  let crop = portraitCrop(width, height)
   const video = document.createElement("video")
   video.muted = true
   video.playsInline = true
@@ -47,10 +48,30 @@ export function portraitStream(source: MediaStream): PortraitStream {
   canvas.height = crop.h
   const ctx = canvas.getContext("2d")
   if (!ctx) throw new Error("Canvas 2D is unavailable, so the camera frame can't be cropped")
+
+  // The settings above are what the track claims; the frames are what count.
+  // Some phone browsers have reported the sensor's landscape size for an
+  // upright camera, so once the first frame's size is known, recrop to it
+  // (and keep the whole frame if it turns out to be portrait after all).
+  video.addEventListener(
+    "loadedmetadata",
+    () => {
+      const vw = video.videoWidth
+      const vh = video.videoHeight
+      if (!vw || !vh || (vw === width && vh === height)) return
+      console.warn(`portraitStream: the camera reported ${width}×${height} but delivers ${vw}×${vh}; recropping`)
+      crop = vh >= vw ? { x: 0, y: 0, w: vw, h: vh } : portraitCrop(vw, vh)
+      canvas.width = crop.w
+      canvas.height = crop.h
+    },
+    { once: true },
+  )
+
   // readyState 2 is HAVE_CURRENT_DATA: a frame is there to copy. A timer
-  // rather than requestAnimationFrame so drawing goes on when the tab is
-  // hidden, as far as the browser allows (both slow to about once a second
-  // in the background, so a recording made from a hidden tab stutters).
+  // rather than requestAnimationFrame: rAF stops completely while the tab is
+  // hidden, a timer keeps firing, throttled to about once a second (Chrome:
+  // once a minute after five minutes hidden), so a recording made from a
+  // hidden tab stutters rather than freezes.
   const draw = () => {
     if (video.readyState >= 2) ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
   }

@@ -20,13 +20,15 @@ import {
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
-import type { Check, RecordingChecks } from "@/lib/studio/checks"
+import { faceVerdict, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
+import { describeSubmitError } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording } from "@/lib/studio/recorder"
 import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
 import {
+  ApiError,
   lastSent,
   newSubmissionId,
   rememberSent,
@@ -75,10 +77,14 @@ export function CaptureFlow() {
   const [cameraBusy, setCameraBusy] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const recorder = useRef<ActiveRecorder | null>(null)
+  // Counts takes, so a Finish that was still completing when the person
+  // pressed Start over (or the camera died) doesn't go on to the review.
+  const take = useRef(0)
   // What the framing step saw (null: the tracker never ran) and a tally of
   // the readings while recording, which decide the recording's face check.
   const alignFaceSeen = useRef<Check>(null)
   const faceFrames = useRef({ total: 0, found: 0 })
+  const [signOutError, setSignOutError] = useState<string | null>(null)
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
@@ -102,35 +108,41 @@ export function CaptureFlow() {
     }
     if (!user) return
     let cancelled = false
-    void Promise.all([loadProfile(user.uid), loadTake(user.uid)]).then(([loaded, saved]) => {
-      if (cancelled) return
-      const next = { name: loaded.name ?? "", firm: loaded.firm ?? "" }
-      setProfile(next)
-      const previous = lastSent(user.uid)
-      setSent(previous)
-      identify((user.email ?? "").toLowerCase(), next)
-      // A take left from a reload or a closed tab: pick up at review rather
-      // than making them record again.
-      if (!previous && saved && next.name && next.firm) {
-        const { take, blob, chunks } = saved
-        setRecording({
-          blob,
-          url: URL.createObjectURL(blob),
-          mime: take.mime,
-          seconds: take.finished?.seconds ?? chunks,
-          source: take.source,
-          checks: take.finished?.checks,
-        })
-        setReviewNotice(
-          take.finished
-            ? "We kept your last recording. Watch it, then submit it or record again."
-            : "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.",
-        )
-        setStep("review")
-        return
-      }
-      setStep(previous ? "done" : next.name && next.firm ? "setup" : "about")
-    })
+    void Promise.all([loadProfile(user.uid), loadTake(user.uid)])
+      .then(([loaded, saved]) => {
+        if (cancelled) return
+        const next = { name: loaded.name ?? "", firm: loaded.firm ?? "" }
+        setProfile(next)
+        const previous = lastSent(user.uid)
+        setSent(previous)
+        identify((user.email ?? "").toLowerCase(), next)
+        // A take left from a reload or a closed tab: pick up at review rather
+        // than making them record again.
+        if (!previous && saved && next.name && next.firm) {
+          const { take: stored, blob, chunks } = saved
+          setRecording({
+            blob,
+            url: URL.createObjectURL(blob),
+            mime: stored.mime,
+            seconds: stored.finished?.seconds ?? chunks,
+            source: "camera",
+            checks: stored.finished?.checks,
+          })
+          setReviewNotice(
+            stored.finished
+              ? "We kept your last recording. Watch it, then submit it or record again."
+              : "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.",
+          )
+          setStep("review")
+          return
+        }
+        setStep(previous ? "done" : next.name && next.firm ? "setup" : "about")
+      })
+      .catch((error: unknown) => {
+        // Never leave the page on "Loading…": without a profile, start at the top.
+        console.error("Loading the studio profile failed", error)
+        if (!cancelled) setStep("about")
+      })
     return () => {
       cancelled = true
     }
@@ -170,6 +182,20 @@ export function CaptureFlow() {
   const recordingSupported =
     typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(pickRecordingMime())
 
+  // The camera or the recorder gave out (unplugged, taken by another app, a
+  // tab the phone put to sleep): stop pretending to record and say so.
+  const abandonCamera = useCallback(
+    (reason: string) => {
+      take.current += 1
+      recorder.current?.cancel()
+      recorder.current = null
+      stopCamera()
+      setCameraError(reason)
+      setStep("camera")
+    },
+    [stopCamera],
+  )
+
   async function openCamera() {
     setCameraError(null)
     setCameraBusy(true)
@@ -181,6 +207,16 @@ export function CaptureFlow() {
         video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1920 }, frameRate: { ideal: 30 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
+      // A track that ends on its own (stop() doesn't fire this) means the
+      // camera went away; the cropped canvas stream would keep drawing the
+      // last frame, so it has to be caught here.
+      for (const track of media.getTracks()) {
+        track.addEventListener("ended", () => {
+          if (streamRef.current !== media) return
+          console.error(`The camera's ${track.kind} track ended on its own`)
+          abandonCamera("Your camera or microphone stopped. Plug it back in or close the app using it, then try again.")
+        })
+      }
       streamRef.current = media
       setCamera(media)
       portrait.current?.stop()
@@ -216,13 +252,20 @@ export function CaptureFlow() {
       source: "camera",
       startedAt: Date.now(),
     })
-    return startRecording(media, (chunk, index) => void saveChunk(takeId, index, chunk))
+    return startRecording(media, {
+      onChunk: (chunk, index) => void saveChunk(takeId, index, chunk),
+      onEnded: (reason) => {
+        console.error(`Recording ended on its own (${reason})`)
+        abandonCamera("Recording stopped: your camera or microphone was lost. Try again, or open this page on your phone.")
+      },
+    })
   }
 
   // Framing checks passed (or the person chose to start anyway): recording
   // starts and the script comes up.
   function beginScript(result: { faceSeen: Check }) {
     if (!stream) return
+    take.current += 1
     alignFaceSeen.current = result.faceSeen
     faceFrames.current = { total: 0, found: 0 }
     recorder.current?.cancel()
@@ -243,6 +286,7 @@ export function CaptureFlow() {
   }
 
   function restartRecording() {
+    take.current += 1
     recorder.current?.cancel()
     recorder.current = null
     setStep(stream ? "align" : "camera")
@@ -252,16 +296,13 @@ export function CaptureFlow() {
     const active = recorder.current
     recorder.current = null
     if (!active) return
+    const finishing = take.current
     const result = await active.stop()
-    // Restart was pressed while this clip was finishing: keep the new take.
-    if (recorder.current) return
+    // Start over was pressed (or the camera gave out) while this clip was
+    // finishing: that decision wins.
+    if (take.current !== finishing) return
     stopCamera()
-    // With at least two seconds of readings while recording, the face was
-    // there if it was in most of them. Otherwise fall back to what the
-    // framing step saw (null when the tracker never ran).
-    const frames = faceFrames.current
-    const faceSeen: Check = frames.total >= 30 ? frames.found / frames.total >= 0.5 : alignFaceSeen.current
-    const checks: RecordingChecks = { faceSeen, voiceHeard: result.voiceHeard }
+    const checks: RecordingChecks = { faceSeen: faceVerdict(faceFrames.current, alignFaceSeen.current), voiceHeard: result.voiceHeard }
     if (user) void finishTake(user.uid, { seconds: result.seconds, checks })
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
@@ -352,8 +393,10 @@ export function CaptureFlow() {
       track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
       setStep("done")
     } catch (error) {
+      // Only the API's own message is written for the person; SDK and fetch
+      // errors get words of ours.
       console.error("Request failed", error)
-      setSendError(error instanceof Error ? error.message : "We couldn't send your request. Try again.")
+      setSendError(error instanceof ApiError ? error.message : describeSubmitError(error))
     } finally {
       setSending(false)
     }
@@ -376,10 +419,18 @@ export function CaptureFlow() {
   }
 
   async function signOut() {
+    setSignOutError(null)
     stopCamera()
-    // Don't leave a recording of their face on a shared computer.
-    if (user) await clearTake(user.uid)
-    await signOutOfStudio()
+    // Don't leave a recording of their face on a shared computer; but a
+    // failure to clear it must not keep them signed in.
+    if (user) await clearTake(user.uid).catch((error: unknown) => console.warn("Couldn't clear the saved take before sign-out", error))
+    try {
+      await signOutOfStudio()
+    } catch (error) {
+      console.error("Sign-out failed", error)
+      setSignOutError("We couldn't sign you out. Reload the page and try again.")
+      return
+    }
     router.replace("/signin")
   }
 
@@ -387,15 +438,20 @@ export function CaptureFlow() {
 
   const email = user?.email ?? ""
   const account = (
-    <AccountHeader
-      name={profile.name}
-      email={email}
-      initials={initials(profile.name, email)}
-      onSignOut={() => void signOut()}
-    />
+    <>
+      <AccountHeader
+        name={profile.name}
+        email={email}
+        initials={initials(profile.name, email)}
+        onSignOut={() => void signOut()}
+      />
+      {signOutError && (
+        <div className="mx-auto w-full max-w-[1120px] px-(--page-pad) pt-3">
+          <ErrorText>{signOutError}</ErrorText>
+        </div>
+      )}
+    </>
   )
-
-
 
   if (step === "loading" || !user) {
     return (

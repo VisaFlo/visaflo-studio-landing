@@ -1,10 +1,13 @@
-import { isStudioAdmin } from "@/lib/studio/admin"
+import { isStudioAdmin, UNVERIFIED_CODE } from "@/lib/studio/admin"
 import { bearerToken, verifyFailure, verifyIdToken, type VerifiedUser } from "@/lib/studio/verify-id-token"
 
-// Every /api/admin route starts here. Returns the verified admin and their
-// token (the storage reads use that same token, so the rules check the
-// admin again on every object), or the Response to send back.
-export async function requireAdmin(request: Request): Promise<{ user: VerifiedUser; token: string } | Response> {
+/** The verified admin and the token they sent; the storage reads reuse that token, so the rules check the admin again on every object. */
+export type AdminSession = { user: VerifiedUser; token: string }
+
+// Every /api/admin route starts here. Returns the session, or the Response to
+// send back (a route that forgets the `instanceof Response` branch doesn't
+// compile: a Response has no `.token`).
+export async function requireAdmin(request: Request): Promise<AdminSession | Response> {
   const token = bearerToken(request)
   if (!token) return Response.json({ error: "Sign in again, then retry." }, { status: 401 })
   let user: VerifiedUser
@@ -12,7 +15,7 @@ export async function requireAdmin(request: Request): Promise<{ user: VerifiedUs
     user = await verifyIdToken(token)
   } catch (error) {
     const failure = verifyFailure(error)
-    if (failure.status !== 401 || (error as { code?: string }).code !== "ERR_JWT_EXPIRED") console.error("verifyIdToken failed", error)
+    if (failure.kind !== "expired") console.error("verifyIdToken failed", error)
     return Response.json({ error: failure.message }, { status: failure.status })
   }
   // The admin check comes first, so a non-admin never learns there is a
@@ -20,10 +23,8 @@ export async function requireAdmin(request: Request): Promise<{ user: VerifiedUs
   if (!isStudioAdmin(user.email)) {
     return Response.json({ error: "This page is only for the Studio admin account." }, { status: 403 })
   }
-  // `code: "unverified"` is what the admin pages key on to show the
-  // "Send verification email" panel instead of an error.
   if (!user.emailVerified) {
-    return Response.json({ error: "Verify your email first.", code: "unverified" }, { status: 403 })
+    return Response.json({ error: "Verify your email first.", code: UNVERIFIED_CODE }, { status: 403 })
   }
   return { user, token }
 }

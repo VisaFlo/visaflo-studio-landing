@@ -30,7 +30,7 @@ describe("GET /api/admin/recording", () => {
     expect((await get("u1/s1")).status).toBe(404)
   })
 
-  it("streams the file as an attachment named after the person, passing the type and length through", async () => {
+  it("streams the file as a private attachment named after the person, passing the type and length through", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -47,10 +47,24 @@ describe("GET /api/admin/recording", () => {
     expect(response.headers.get("content-disposition")).toBe('attachment; filename="dan-x-y-s1.webm"')
     expect(response.headers.get("content-type")).toBe("video/webm")
     expect(response.headers.get("content-length")).toBe("5")
+    expect(response.headers.get("cache-control")).toBe("private, no-store")
     expect(await response.text()).toBe("hello")
   })
 
-  it("still downloads, named by uid, when request.json can't be read", async () => {
+  it("downloads a recorded-only folder quietly, named by uid, with a default type and no made-up length", async () => {
+    fakeBucket({
+      listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } },
+      media: { "studio/u1/s1/recording.mp4": "bytes" },
+    })
+    const response = await get("u1/s1")
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="u1-s1.mp4"')
+    expect(response.headers.get("content-type")).toBe("text/plain")
+    expect(await response.text()).toBe("bytes")
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("still downloads, named by uid, when request.json can't be read, and logs why", async () => {
     fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       media: { "studio/u1/s1/request.json": 500, "studio/u1/s1/recording.mp4": "bytes" },
@@ -58,6 +72,30 @@ describe("GET /api/admin/recording", () => {
     const response = await get("u1/s1")
     expect(response.status).toBe(200)
     expect(response.headers.get("content-disposition")).toBe('attachment; filename="u1-s1.mp4"')
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("request.json for u1/s1"), expect.anything())
+  })
+
+  it("logs a stream that breaks mid-body with the submission it was for", async () => {
+    const broken = () =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("part"))
+          controller.error(new Error("upstream reset"))
+        },
+      })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith("/o")) return Response.json({ items: [{ name: "studio/u1/s1/recording.mp4" }] })
+        if (url.pathname.includes("request.json")) return new Response("not found", { status: 404 })
+        return new Response(broken(), { headers: { "content-type": "video/mp4" } })
+      }),
+    )
+    const response = await get("u1/s1")
+    expect(response.status).toBe(200)
+    await expect(response.text()).rejects.toThrow()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Streaming the recording for u1/s1"), expect.anything())
   })
 
   it("tells rules problems from sign-in problems from the rest", async () => {
@@ -73,8 +111,10 @@ describe("GET /api/admin/recording", () => {
     expect((await get("u1/s1")).status).toBe(500)
   })
 
-  it("passes the admin gate's own response through", async () => {
+  it("passes the admin gate's own response through without touching Storage", async () => {
     admin.mockResolvedValue(Response.json({ error: "no" }, { status: 403 }))
+    const fetch = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } } })
     expect((await get("u1/s1")).status).toBe(403)
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

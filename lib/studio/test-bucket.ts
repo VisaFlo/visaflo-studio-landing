@@ -4,9 +4,13 @@ import type { ObjectMeta } from "@/lib/studio/storage"
 
 // A fake Firebase Storage REST endpoint for tests: `fetch` is stubbed so the
 // real listObjects / storageGet code runs against these objects. A number in
-// place of a value answers with that HTTP status.
+// place of a value answers with that HTTP status. Like the real API, an
+// unknown prefix lists as empty (200) while an unknown object is a 404.
 export type Bucket = {
-  /** Keyed by the prefix listed ("studio/", "studio/u1/s1/"). */
+  /**
+   * Keyed by the prefix listed ("studio/", "studio/u1/s1/"); a later page of
+   * the same prefix is keyed "<prefix>#<pageToken>".
+   */
   listings: Record<string, { prefixes?: string[]; items?: string[]; nextPageToken?: string } | number>
   /** Object metadata by object name. */
   meta?: Record<string, ObjectMeta | number>
@@ -18,8 +22,10 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 const refuse = (status: number) => new Response(`status ${status}`, { status })
 
-export function fakeBucket(bucket: Bucket): ReturnType<typeof vi.fn> {
-  const fetch = vi.fn(async (input: RequestInfo | URL) => {
+type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+export function fakeBucket(bucket: Bucket) {
+  const fetch = vi.fn<Fetch>(async (input) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)
     const rest = url.pathname.replace(/^\/v0\/b\/[^/]+\/o/, "")
     if (rest === "") {
