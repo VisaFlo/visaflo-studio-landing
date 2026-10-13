@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { checkFlags, describeChecks, FACE_MIN_FRAMES, faceVerdict, parseChecks } from "@/lib/studio/checks"
+import { checkFlags, describeChecks, FACE_MIN_FRAMES, faceVerdict, markPlayable, parseChecks } from "@/lib/studio/checks"
 
 describe("parseChecks", () => {
   it("keeps true, false and null (not checked) and drops anything else", () => {
@@ -17,10 +17,29 @@ describe("parseChecks", () => {
 })
 
 describe("parseChecks: the review's playback result", () => {
-  it("is carried only when the browser sent it", () => {
-    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: false })).toEqual({ faceSeen: true, voiceHeard: true, playable: false })
-    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: "x" })).toEqual({ faceSeen: true, voiceHeard: true, playable: null })
-    expect(parseChecks({ faceSeen: true, voiceHeard: true })).toEqual({ faceSeen: true, voiceHeard: true })
+  it("is carried only when the browser sent a yes or a no", () => {
+    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: false })).toStrictEqual({ faceSeen: true, voiceHeard: true, playable: false })
+    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: "x" })).toStrictEqual({ faceSeen: true, voiceHeard: true })
+    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: null })).toStrictEqual({ faceSeen: true, voiceHeard: true })
+    expect(parseChecks({ faceSeen: true, voiceHeard: true })).toStrictEqual({ faceSeen: true, voiceHeard: true })
+  })
+})
+
+describe("markPlayable", () => {
+  const measured = { faceSeen: true, voiceHeard: true }
+
+  it("adds the player's verdict to measured checks, and a no sticks for the take", () => {
+    expect(markPlayable(measured, true)).toStrictEqual({ ...measured, playable: true })
+    expect(markPlayable({ ...measured, playable: false }, true)).toStrictEqual({ ...measured, playable: false })
+    expect(markPlayable({ ...measured, playable: true }, false)).toStrictEqual({ ...measured, playable: false })
+  })
+  it("returns the same object when nothing changes, so a replay doesn't re-render the flow", () => {
+    const checks = { ...measured, playable: true }
+    expect(markPlayable(checks, true)).toBe(checks)
+  })
+  it("doesn't invent measurements for a take that has none, except to record that it wouldn't play", () => {
+    expect(markPlayable(undefined, true)).toBeUndefined()
+    expect(markPlayable(undefined, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, playable: false })
   })
 })
 
@@ -34,7 +53,7 @@ describe("checkFlags", () => {
   it("flags a take the review player couldn't play, and nothing when it could or wasn't tried", () => {
     expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: false })).toEqual(["Review couldn't play it"])
     expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: true })).toEqual([])
-    expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: null })).toEqual([])
+    expect(checkFlags({ faceSeen: true, voiceHeard: true })).toEqual([])
   })
   it("says so when a finished request carries no checks at all, so it can't pass for a clean take", () => {
     expect(checkFlags(undefined)).toEqual(["Checks not recorded"])

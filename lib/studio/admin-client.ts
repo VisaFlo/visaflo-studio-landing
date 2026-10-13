@@ -8,14 +8,16 @@ import { describeLoadError, parseJsonObject } from "@/lib/studio/errors"
 
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "unverified" } | { status: "error"; message: string }
 
-type Body = Record<string, unknown> & { error?: string; code?: string }
+// What the API answered, as parsed: `pick` and the checks below read each
+// field by type rather than trusting a declared shape.
+type Body = Record<string, unknown>
 
 type AdminPath = `/api/admin/${string}`
 
 // One request to /api/admin/*, turned into a Load state. The body is read as
 // text and parsed by hand so a non-JSON answer (a gateway's HTML timeout
 // page) is logged with its status instead of vanishing into a parse error.
-export async function adminRequest<T>(user: User, path: AdminPath, pick: (body: Body) => T | undefined): Promise<Load<T>> {
+export async function adminRequest<T>(user: Pick<User, "getIdToken">, path: AdminPath, pick: (body: Body) => T | undefined): Promise<Load<T>> {
   try {
     // A fresh token, so a just-verified email counts right away.
     const token = await user.getIdToken(true)
@@ -26,8 +28,9 @@ export async function adminRequest<T>(user: User, path: AdminPath, pick: (body: 
     const data = response.ok && body ? pick(body) : undefined
     if (data !== undefined) return { status: "ready", data }
     if (response.ok) {
-      // Valid JSON of the wrong shape (or a non-JSON 200, logged above): the
-      // API and this page disagree, so keep the body for whoever looks.
+      // Valid JSON of the wrong shape (or a non-object or non-JSON 200, which
+      // parseJsonObject logged): the API and this page disagree, so keep the
+      // body for whoever looks.
       if (body) console.error(`${path} answered ${response.status} with an unexpected body`, raw.slice(0, 300))
       return { status: "error", message: "The server answered in a form this page doesn't understand. Reload to try again." }
     }

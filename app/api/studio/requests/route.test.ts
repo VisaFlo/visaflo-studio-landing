@@ -66,11 +66,13 @@ describe("POST /api/studio/requests", () => {
     expect(mail).not.toHaveBeenCalled()
   })
 
-  it("logs the other refusals too: a body that isn't JSON, no topic, a bad consent time", async () => {
+  it("logs the other refusals too: a body that isn't JSON or isn't an object, no topic, a bad consent time", async () => {
     expect((await postRaw("not json")).status).toBe(400)
+    expect((await postRaw("null")).status).toBe(400)
+    expect((await postRaw("[1]")).status).toBe(400)
     expect((await post({ ...BODY, topicTitle: "" })).status).toBe(400)
     expect((await post({ ...BODY, consentAt: "yesterday" })).status).toBe(400)
-    expect(console.error).toHaveBeenCalledTimes(3)
+    expect(console.error).toHaveBeenCalledTimes(5)
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("u1"), expect.anything())
   })
 

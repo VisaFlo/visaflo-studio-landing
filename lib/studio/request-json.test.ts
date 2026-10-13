@@ -36,7 +36,11 @@ describe("asEmail", () => {
     expect(asEmail("a@b.c#x")).toBeUndefined()
     expect(asEmail("not an email")).toBeUndefined()
     expect(asEmail("")).toBeUndefined()
+  })
+  it("refuses an over-long address rather than cutting it into a different one", () => {
     expect(asEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
+    expect(asEmail(`dan@firm.ca${"x".repeat(300)}`)).toBeUndefined()
+    expect(asEmail(`${"a".repeat(240)}@b.c`)).toBe(`${"a".repeat(240)}@b.c`)
   })
 })
 
@@ -60,6 +64,11 @@ describe("seconds", () => {
     expect(seconds("abc")).toBeUndefined()
     expect(seconds(Infinity)).toBeUndefined()
     expect(seconds(1e15)).toBeUndefined()
+    expect(seconds(86400)).toBe(86400)
+    expect(seconds(86401)).toBeUndefined()
+    // Rounded first: 0.4 s is no length at all.
+    expect(seconds(0.4)).toBeUndefined()
+    expect(seconds("1e3")).toBeUndefined()
   })
   it("reads only a number or a decimal string, not whatever Number() would coerce", () => {
     expect(seconds(true)).toBeUndefined()
@@ -77,18 +86,18 @@ describe("readRequestJson", () => {
       firm: 42,
       topicTitle: " Express Entry ",
       recordingSeconds: "61",
-      checks: { faceSeen: true, voiceHeard: null },
+      checks: { faceSeen: true, voiceHeard: null, playable: false },
       consent: { nope: true },
       consentAt: "2026-10-09T21:17:55.000Z",
       createdAt: ["x"],
       extra: "ignored",
     }
-    expect(readRequestJson(raw)).toEqual({
+    expect(readRequestJson(raw)).toStrictEqual({
       email: "a@b.c",
       name: "Dan",
       topicTitle: "Express Entry",
       recordingSeconds: 61,
-      checks: { faceSeen: true, voiceHeard: null },
+      checks: { faceSeen: true, voiceHeard: null, playable: false },
       consentAt: "2026-10-09T21:17:55.000Z",
     })
   })

@@ -30,12 +30,15 @@ export function identifier(value: unknown, max: number): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined
 }
 
-// One plain address. Anything with whitespace or a character that could add
-// recipients or a body once the admin page puts it in a mailto: link
-// (? & % , ; #) is dropped.
+/** The longest address kept (RFC 5321's limit); longer ones are refused, not cut, since a cut address is a different address. */
+const MAX_EMAIL = 254
+
+// One plain address, trimmed. Anything with inner whitespace or a character
+// that could add recipients or a body once the admin page puts it in a
+// mailto: link (? & % , ; #) is dropped.
 export function asEmail(value: unknown): string | undefined {
-  const candidate = text(value)
-  return candidate && /^[^\s@?&%,;#]+@[^\s@?&%,;#]+$/.test(candidate) ? candidate : undefined
+  const candidate = typeof value === "string" ? value.trim() : ""
+  return candidate.length > 0 && candidate.length <= MAX_EMAIL && /^[^\s@?&%,;#]+@[^\s@?&%,;#]+$/.test(candidate) ? candidate : undefined
 }
 
 // A timestamp Date.parse understands, normalised to ISO: the list is sorted

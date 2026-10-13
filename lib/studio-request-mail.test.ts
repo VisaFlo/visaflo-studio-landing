@@ -42,6 +42,11 @@ describe("sendStudioRequestEmail", () => {
     expect(sent().html).not.toContain("<b>Dan</b>")
   })
 
+  it("shouts when the review player couldn't play the take", async () => {
+    await sendStudioRequestEmail({ ...ENTRY, checks: { faceSeen: true, voiceHeard: true, playable: false } })
+    expect(sent().text).toContain("face seen, voice heard, REVIEW COULDN'T PLAY IT")
+  })
+
   it("says when no checks were sent, without asserting why, and when the length is unknown", async () => {
     await sendStudioRequestEmail({ ...ENTRY, checks: undefined, recordingSeconds: 0 })
     expect(sent().text).toContain("length unknown (camera), no checks sent")

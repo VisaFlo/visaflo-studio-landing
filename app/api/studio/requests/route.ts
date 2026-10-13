@@ -1,5 +1,5 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
-import { parseChecks } from "@/lib/studio/checks"
+import { isPlainObject, parseChecks } from "@/lib/studio/checks"
 import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
 import { identifier, isoDate, LIMITS, seconds, text } from "@/lib/studio/request-json"
 import { bearerToken, verifyFailure, verifyIdToken } from "@/lib/studio/verify-id-token"
@@ -22,13 +22,18 @@ export async function POST(request: Request) {
     return Response.json({ error: failure.message }, { status: failure.status })
   }
 
-  let body: Record<string, unknown>
+  let parsed: unknown
   try {
-    body = (await request.json()) as Record<string, unknown>
+    parsed = await request.json()
   } catch (error) {
     console.error(`Unreadable request body from ${user.uid}`, error)
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
+  if (!isPlainObject(parsed)) {
+    console.error(`Request body from ${user.uid} isn't an object`, { body: parsed })
+    return Response.json({ error: "Invalid request body." }, { status: 400 })
+  }
+  const body = parsed
 
   const submissionId = identifier(body.submissionId, LIMITS.submissionId) ?? ""
   const recordingPath = identifier(body.recordingPath, LIMITS.recordingPath) ?? ""

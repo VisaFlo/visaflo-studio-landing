@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { startRecording, STOP_TIMEOUT_MS, type ActiveRecorder } from "@/lib/studio/recorder"
 
 // Just enough MediaRecorder to drive startRecording: data and stop events are
-// fired by the test, the way the browser would.
+// fired by the test (synchronously; the winding-down test plays the browser's
+// real inactive → data → stop order by hand).
 class FakeRecorder {
   static instances: FakeRecorder[] = []
   static isTypeSupported = () => true
@@ -151,6 +152,19 @@ describe("startRecording's voice check", () => {
     expect((await active.stop()).voiceHeard).toBeNull()
   })
 
+  it("counts a tick that ran late as 250 ms, not as the whole gap, so a frozen main thread can't invent two seconds of voice", async () => {
+    let now = 0
+    vi.spyOn(performance, "now").mockImplementation(() => now)
+    const { active, recorder } = setup(fakeAudio(0.1))
+    // The main thread froze for five seconds; one tick runs when it wakes.
+    now = 5000
+    vi.advanceTimersByTime(100)
+    recorder.chunk()
+    const take = await active.stop()
+    expect(take.seconds).toBe(5)
+    expect(take.voiceHeard).toBeNull()
+  })
+
   it("reports false after a silent take and true after two seconds of voice", async () => {
     const silent = setup(fakeAudio(0))
     vi.advanceTimersByTime(3000)
@@ -235,6 +249,39 @@ describe("startRecording's length and lifetime", () => {
     recorder.chunk()
     recorder.onstop?.(new Event("stop"))
     expect((await pending).blob.size).toBe(2)
+  })
+
+  it("leaves no timer behind once a stop confirms, so the give-up never fires on a finished take", async () => {
+    const { active, recorder } = setup(fakeAudio(0))
+    recorder.chunk()
+    await active.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(STOP_TIMEOUT_MS)
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("answers a second stop() with the same take, and a stop() after cancel() at once", async () => {
+    const { active, recorder } = setup(fakeAudio(0))
+    recorder.chunk()
+    const first = active.stop()
+    expect(active.stop()).toBe(first)
+    expect((await first).blob.size).toBe(1)
+
+    const discarded = setup(fakeAudio(0), { Recorder: StuckRecorder })
+    discarded.active.cancel()
+    const late = await discarded.active.stop()
+    expect(late.cutOff).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("lets cancel() end a stop() that is still waiting, without the give-up firing later", async () => {
+    const { active, recorder } = setup(fakeAudio(0), { Recorder: StuckRecorder })
+    recorder.chunk()
+    const pending = active.stop()
+    active.cancel()
+    expect((await pending).blob.size).toBe(1)
+    vi.advanceTimersByTime(STOP_TIMEOUT_MS)
+    expect(console.error).not.toHaveBeenCalled()
   })
 
   it("gives up on a stop that never confirms, keeping the data and marking the take cut off", async () => {

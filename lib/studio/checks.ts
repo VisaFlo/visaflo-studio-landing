@@ -8,16 +8,19 @@ export type RecordingChecks = {
   faceSeen: Check
   voiceHeard: Check
   /**
-   * Whether the review page's player could play the take: false means the
-   * file is probably damaged. Absent when the person never pressed play
-   * (older request.json files have no such field either).
+   * Whether the review page's player could play the take back: false means
+   * the file is probably damaged. Unlike the two checks above this is not
+   * tri-state: it is absent when the player reported neither way (no play
+   * press and no load error), which is the common case and not a flag.
+   * Older request.json files have no such field either.
    */
-  playable?: Check
+  playable?: boolean
 }
 
 const check = (value: unknown): Check => (value === true ? true : value === false ? false : null)
 
-// A JSON object, as opposed to null, an array or a bare value.
+// A JSON object (as JSON.parse would produce), as opposed to null, an array
+// or a bare value.
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
@@ -27,8 +30,19 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 export function parseChecks(raw: unknown): RecordingChecks | undefined {
   if (!isPlainObject(raw)) return undefined
   const checks: RecordingChecks = { faceSeen: check(raw.faceSeen), voiceHeard: check(raw.voiceHeard) }
-  if ("playable" in raw) checks.playable = check(raw.playable)
+  if (typeof raw.playable === "boolean") checks.playable = raw.playable
   return checks
+}
+
+// The review player's verdict added to a take's checks. A "no" sticks for the
+// take (a later replay must not clear a decode failure), the same object is
+// returned when nothing changes, and a take with no measured checks (one
+// recovered after the page closed mid-recording) gets none invented for it,
+// except to record that it wouldn't play.
+export function markPlayable(checks: RecordingChecks | undefined, playable: boolean): RecordingChecks | undefined {
+  if (!checks) return playable ? undefined : { faceSeen: null, voiceHeard: null, playable: false }
+  const next = checks.playable === false ? false : playable
+  return checks.playable === next ? checks : { ...checks, playable: next }
 }
 
 // Readings the tracker makes while recording before its tally outweighs what

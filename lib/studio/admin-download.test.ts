@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { User } from "firebase/auth"
 
 import { fetchRecording } from "@/lib/studio/admin-download"
 import { ApiError } from "@/lib/studio/errors"
 
-const user = { getIdToken: vi.fn(async () => "tok") } as unknown as User
+const user = { getIdToken: vi.fn(async () => "tok") }
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 const reply = (response: () => Response) => {
   const fetch = vi.fn<Fetch>(async () => response())

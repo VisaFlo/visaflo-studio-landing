@@ -20,7 +20,7 @@ import {
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
-import { faceVerdict, type Check, type RecordingChecks } from "@/lib/studio/checks"
+import { faceVerdict, markPlayable, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { ApiError, describeSubmitError, uploadFailureReason, type UploadFailure } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
@@ -87,6 +87,9 @@ export function CaptureFlow() {
   const [consentAt, setConsentAt] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewNotice, setReviewNotice] = useState<string | null>(null)
+  // The take on review is only part of what was recorded (cut off, or
+  // recovered before Finish), which changes what an unplayable file means.
+  const [reviewPartial, setReviewPartial] = useState(false)
 
   const submissionId = useRef<string | null>(null)
   const upload = useRef<UploadHandle | null>(null)
@@ -129,6 +132,7 @@ export function CaptureFlow() {
               ? "We kept your last recording. Watch it, then submit it or record again."
               : "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.",
           )
+          setReviewPartial(!stored.finished)
           setStep("review")
           return
         }
@@ -184,11 +188,17 @@ export function CaptureFlow() {
   // closed while you were recording", which isn't what happened.
   const abandonCamera = useCallback(
     (reason: string) => {
-      take.current += 1
-      recorder.current?.cancel()
+      // Only a take in progress is the one being abandoned. With nothing
+      // recording (the align step, or a Finish already waiting on its data) a
+      // saved take belongs to someone else's decision and stays.
+      const active = recorder.current
       recorder.current = null
+      if (active) {
+        take.current += 1
+        active.cancel()
+        if (user) void clearTake(user.uid)
+      }
       stopCamera()
-      if (user) void clearTake(user.uid)
       setCameraError(reason)
       setStep("camera")
     },
@@ -290,10 +300,14 @@ export function CaptureFlow() {
     setStep("script")
   }
 
+  // Start over: the take being recorded is discarded, saved chunks included,
+  // or a later visit would offer it back as a take the page lost.
   function restartRecording() {
     take.current += 1
-    recorder.current?.cancel()
+    const active = recorder.current
     recorder.current = null
+    active?.cancel()
+    if (active && user) void clearTake(user.uid)
     setStep(stream ? "align" : "camera")
   }
 
@@ -331,6 +345,7 @@ export function CaptureFlow() {
     })
     setReviewError(null)
     setReviewNotice(result.cutOff ? "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again." : null)
+    setReviewPartial(result.cutOff)
     setStep("review")
   }, [abandonCamera, stopCamera, user])
 
@@ -564,10 +579,14 @@ export function CaptureFlow() {
             onConsent={setConsent}
             error={reviewError}
             notice={reviewNotice}
+            partial={reviewPartial}
             onPlayable={(playable) =>
               // Whether this browser could play its own take back travels with
               // the checks, so the team hears about a damaged file.
-              setRecording((r) => (r ? { ...r, checks: { ...(r.checks ?? { faceSeen: null, voiceHeard: null }), playable } } : r))
+              setRecording((r) => {
+                const checks = markPlayable(r?.checks, playable)
+                return r && checks !== r.checks ? { ...r, checks } : r
+              })
             }
             onSubmit={submitRecording}
             onRedo={() => setStep("camera")}

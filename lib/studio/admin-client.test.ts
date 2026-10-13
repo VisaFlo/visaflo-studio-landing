@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { User } from "firebase/auth"
 
 import { adminRequest } from "@/lib/studio/admin-client"
 
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-const user = (token = "tok") => ({ getIdToken: vi.fn(async () => token) }) as unknown as User
+const user = (token = "tok") => ({ getIdToken: vi.fn(async () => token) })
 const pick = (body: Record<string, unknown>) => (Array.isArray(body.items) ? (body.items as string[]) : undefined)
 const reply = (body: BodyInit | null, status = 200, type = "application/json") => {
   const fetch = vi.fn<Fetch>(async () => new Response(body, { status, headers: { "content-type": type } }))

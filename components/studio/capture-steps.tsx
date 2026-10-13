@@ -713,6 +713,7 @@ export function ReviewStep({
   consent,
   error,
   notice,
+  partial = false,
   onConsent,
   onPlayable,
   onSubmit,
@@ -723,21 +724,26 @@ export function ReviewStep({
   error?: string | null
   /** Shown above the checks, e.g. for a take recovered after a reload or cut off early. */
   notice?: string | null
+  /** The take is only part of what was recorded (cut off, or recovered before Finish). */
+  partial?: boolean
   onConsent: (value: boolean) => void
-  /** Whether this browser could play the take back; false points at a damaged file. */
+  /**
+   * Whether this browser could play the take back (true once playback really
+   * runs, false on a load or decode error); the flow keeps it with the checks.
+   */
   onPlayable: (playable: boolean) => void
   onSubmit: () => void
   onRedo: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
-  // The URL the player failed on, so a new take gets a fresh verdict.
-  const [failedUrl, setFailedUrl] = useState<string | null>(null)
-  const unplayable = failedUrl === recording.url
   const checks = recording.checks
+  // The flow records the player's "no" in the take's checks (and keeps it),
+  // so the take itself says whether it played.
+  const unplayable = checks?.playable === false
   const short = recording.seconds < 45
   // A check that never ran isn't a complaint.
-  const allGood = !checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short)
+  const allGood = !unplayable && (!checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
 
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
@@ -748,21 +754,19 @@ export function ReviewStep({
           src={recording.url}
           playsInline
           controls={playing}
-          onPlay={() => {
-            setPlaying(true)
-            onPlayable(true)
-          }}
+          onPlay={() => setPlaying(true)}
+          // `playing`, not `play`: frames are really decoding by then.
+          onPlaying={() => onPlayable(true)}
           onError={(event) => {
             console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
-            setFailedUrl(recording.url)
             onPlayable(false)
           }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
         {unplayable && (
           <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            {notice
-              ? "This part of the recording can't be played back here. You can still submit it, or record again."
+            {partial
+              ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
               : "This recording looks damaged and may not play for us either. We recommend recording again."}
           </p>
         )}
