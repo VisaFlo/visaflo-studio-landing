@@ -3,6 +3,7 @@
 import type { User } from "firebase/auth"
 import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebase/storage"
 
+import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
 import { extensionFor, type Recording } from "@/lib/studio/recorder"
 
@@ -64,9 +65,6 @@ export type SampleRequest = {
   consentAt: string
 }
 
-/** What /api/studio/requests answered: a message written for the person, unlike an SDK or fetch error. */
-export class ApiError extends Error {}
-
 // The request is kept next to the recording (so the bucket alone has the full
 // record) and sent to the team inbox through our API.
 export async function submitSampleRequest(user: User, request: SampleRequest): Promise<void> {
@@ -82,10 +80,7 @@ export async function submitSampleRequest(user: User, request: SampleRequest): P
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${await user.getIdToken()}` },
     body: JSON.stringify(request),
   })
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new ApiError(body.error ?? `Request failed (${response.status}). Try again.`)
-  }
+  if (!response.ok) throw apiError("/api/studio/requests", response.status, await response.text())
 }
 
 const doneKey = (uid: string) => `vf_studio_request:${uid}`

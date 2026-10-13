@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils"
 
 // The vertical camera preview, phone-shaped, with a dashed oval where the
 // face should sit. For a landscape webcam this is exactly the 9:16 crop that
-// gets recorded (unless the camera reported no frame size and the full frame
-// is recorded, see portrait.ts); a phone camera's own portrait frame is shown
+// gets recorded (unless the camera reported no frame size, or its frames
+// turned out portrait, and the full frame is recorded; see portrait.ts); a
+// phone camera's own portrait frame is shown
 // object-fit: cover, so anything beyond 9:16 is recorded but not previewed.
 export function PortraitFrame({
   stream,

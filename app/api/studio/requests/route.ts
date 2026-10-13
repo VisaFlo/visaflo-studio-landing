@@ -1,7 +1,7 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
 import { parseChecks } from "@/lib/studio/checks"
 import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
-import { isoDate, LIMITS, text } from "@/lib/studio/request-json"
+import { identifier, isoDate, LIMITS, seconds, text } from "@/lib/studio/request-json"
 import { bearerToken, verifyFailure, verifyIdToken } from "@/lib/studio/verify-id-token"
 
 const RECORDING_FILE = new RegExp(`^recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
@@ -25,15 +25,18 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>
   try {
     body = (await request.json()) as Record<string, unknown>
-  } catch {
+  } catch (error) {
+    console.error(`Unreadable request body from ${user.uid}`, error)
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
 
-  const submissionId = text(body.submissionId, LIMITS.submissionId) ?? ""
-  const recordingPath = text(body.recordingPath, LIMITS.recordingPath) ?? ""
+  const submissionId = identifier(body.submissionId, LIMITS.submissionId) ?? ""
+  const recordingPath = identifier(body.recordingPath, LIMITS.recordingPath) ?? ""
   const folder = `studio/${user.uid}/${submissionId}/`
   const validPath = /^[\w-]+$/.test(submissionId) && recordingPath.startsWith(folder) && RECORDING_FILE.test(recordingPath.slice(folder.length))
   if (!validPath) {
+    // Our own client never sends this, so it is a client bug or someone probing.
+    console.error(`Rejected a recording path from ${user.uid}`, { submissionId: body.submissionId, recordingPath: body.recordingPath })
     return Response.json({ error: "That recording doesn't belong to this account." }, { status: 400 })
   }
   const topicTitle = text(body.topicTitle, LIMITS.topicTitle)
@@ -51,7 +54,7 @@ export async function POST(request: Request) {
       topicTitle,
       submissionId,
       recordingPath,
-      recordingSeconds: Math.max(0, Math.round(Number(body.recordingSeconds) || 0)),
+      recordingSeconds: seconds(body.recordingSeconds) ?? 0,
       recordingSource: "camera",
       checks: parseChecks(body.checks),
       consentAt,

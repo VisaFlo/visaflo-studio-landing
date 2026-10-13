@@ -215,7 +215,8 @@ const COUNTDOWN_SECONDS = 3
 // the review and the team can tell whether a face was in the camera's view
 // while recording. It is a found/not-found tally on the raw camera frame
 // (wider than the recorded crop on a laptop), not the oval check. The flow
-// tallies the readings; no readings at all means the tracker never ran.
+// tallies the readings; with fewer than FACE_MIN_FRAMES of them the framing
+// step's own reading stands (checks.ts).
 export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (frame: FaceFrame) => void }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   useFaceFrames(video, onFrame)
@@ -727,6 +728,7 @@ export function ReviewStep({
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
+  const [unplayable, setUnplayable] = useState(false)
   const checks = recording.checks
   const short = recording.seconds < 45
   // A check that never ran isn't a complaint.
@@ -741,13 +743,22 @@ export function ReviewStep({
           playsInline
           controls={playing}
           onPlay={() => setPlaying(true)}
+          onError={(event) => {
+            console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
+            setUnplayable(true)
+          }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
+        {unplayable && (
+          <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
+            This browser can&apos;t play the recording back. You can still submit it, or record again.
+          </p>
+        )}
         {!playing && (
           <button
             type="button"
             aria-label="Play recording"
-            onClick={() => void player.current?.play()}
+            onClick={() => void player.current?.play().catch((error: unknown) => console.warn("Playback didn't start", error))}
             className="absolute top-1/2 left-1/2 flex size-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/92"
           >
             <Play className="size-7 translate-x-0.5 fill-stone-950 text-stone-950" aria-hidden />

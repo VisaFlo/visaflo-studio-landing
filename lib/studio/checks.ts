@@ -11,7 +11,7 @@ const check = (value: unknown): Check => (value === true ? true : value === fals
 // request.json and the request body come from the person's browser, so each
 // value is read, never trusted as typed.
 export function parseChecks(raw: unknown): RecordingChecks | undefined {
-  if (!raw || typeof raw !== "object") return undefined
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
   const v = raw as Record<string, unknown>
   return { faceSeen: check(v.faceSeen), voiceHeard: check(v.voiceHeard) }
 }

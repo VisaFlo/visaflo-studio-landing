@@ -8,7 +8,7 @@ import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
 import { useAdminLoad } from "@/lib/studio/admin-client"
-import { clipLength, describeProblems, submissionHref, when } from "@/lib/studio/admin-format"
+import { clipLength, describeProblems, submissionHref, topicFallback, when } from "@/lib/studio/admin-format"
 import { checkFlags } from "@/lib/studio/checks"
 
 const pickSubmissions = (body: Record<string, unknown>) => (Array.isArray(body.submissions) ? (body.submissions as Submission[]) : undefined)
@@ -71,11 +71,6 @@ function SubmissionTable({ user, submissions }: { user: User; submissions: Submi
       </table>
     </div>
   )
-}
-
-// What the Topic cell says when there is no topic.
-export function topicFallback(status: Submission["status"]): string {
-  return status === "request-unreadable" ? "Couldn't read request.json" : "No topic picked yet"
 }
 
 function SubmissionRow({ user, submission: s }: { user: User; submission: Submission }) {

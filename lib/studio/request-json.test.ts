@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { isEmail, isoDate, LIMITS, readRequestJson, text } from "@/lib/studio/request-json"
+import { asEmail, identifier, isoDate, LIMITS, readRequestJson, seconds, text } from "@/lib/studio/request-json"
 
 describe("text", () => {
   it("trims, caps, and drops anything that isn't a non-empty string", () => {
@@ -13,24 +13,47 @@ describe("text", () => {
   })
 })
 
-describe("isEmail", () => {
+describe("identifier", () => {
+  it("rejects rather than truncates: an over-long id is not a different id", () => {
+    expect(identifier("20261009T211755-393dbaa7", LIMITS.submissionId)).toBe("20261009T211755-393dbaa7")
+    expect(identifier("x".repeat(65), LIMITS.submissionId)).toBeUndefined()
+    expect(identifier(" padded ", 64)).toBe("padded")
+    expect(identifier(12, 64)).toBeUndefined()
+  })
+})
+
+describe("asEmail", () => {
   it("keeps one plain address and nothing that could steer a mailto: link", () => {
-    expect(isEmail("a.b@firm.ca")).toBe("a.b@firm.ca")
-    expect(isEmail(" A@B.C ")).toBe("A@B.C")
-    expect(isEmail("x@y.com?bcc=evil@z.com")).toBeUndefined()
-    expect(isEmail("x@y.com&body=hi")).toBeUndefined()
-    expect(isEmail("not an email")).toBeUndefined()
-    expect(isEmail("")).toBeUndefined()
-    expect(isEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
+    expect(asEmail("a.b@firm.ca")).toBe("a.b@firm.ca")
+    expect(asEmail(" A@B.C ")).toBe("A@B.C")
+    expect(asEmail("x@y.com?bcc=evil@z.com")).toBeUndefined()
+    expect(asEmail("x@y.com&body=hi")).toBeUndefined()
+    expect(asEmail("not an email")).toBeUndefined()
+    expect(asEmail("")).toBeUndefined()
+    expect(asEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
   })
 })
 
 describe("isoDate", () => {
-  it("keeps a parseable timestamp as written and drops the rest", () => {
+  it("normalises any parseable timestamp to ISO, so the list sorts by time, not by spelling", () => {
     expect(isoDate("2026-10-09T21:17:55.000Z")).toBe("2026-10-09T21:17:55.000Z")
+    expect(isoDate("2026-10-09T14:17:55-07:00")).toBe("2026-10-09T21:17:55.000Z")
+    expect(isoDate("Oct 9 2026 21:17:55 GMT")).toBe("2026-10-09T21:17:55.000Z")
     expect(isoDate("garbage")).toBeUndefined()
     expect(isoDate(1760000000000)).toBeUndefined()
     expect(isoDate(`2026-10-09T21:17:55.000Z${"0".repeat(40)}`)).toBeUndefined()
+  })
+})
+
+describe("seconds", () => {
+  it("keeps only a positive, finite length, rounded", () => {
+    expect(seconds(61.6)).toBe(62)
+    expect(seconds("61")).toBe(61)
+    expect(seconds(-5)).toBeUndefined()
+    expect(seconds(0)).toBeUndefined()
+    expect(seconds("abc")).toBeUndefined()
+    expect(seconds(Infinity)).toBeUndefined()
+    expect(seconds(1e999)).toBeUndefined()
   })
 })
 
@@ -68,7 +91,7 @@ describe("readRequestJson", () => {
   it("drops a blank name, a steering email and an unparseable date", () => {
     expect(readRequestJson({ name: "   " }).name).toBeUndefined()
     expect(readRequestJson({ email: "x@y.com?bcc=evil@z.com" }).email).toBeUndefined()
-    expect(readRequestJson({ consentAt: "yesterday", createdAt: "2026-10-09T00:00:00Z" })).toEqual({ createdAt: "2026-10-09T00:00:00Z" })
+    expect(readRequestJson({ consentAt: "yesterday", createdAt: "2026-10-09T00:00:00Z" })).toEqual({ createdAt: "2026-10-09T00:00:00.000Z" })
   })
   it("keeps only a positive, finite recording length, rounded", () => {
     expect(readRequestJson({ recordingSeconds: 61.6 }).recordingSeconds).toBe(62)

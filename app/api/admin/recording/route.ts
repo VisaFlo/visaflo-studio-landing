@@ -45,9 +45,14 @@ export async function GET(request: Request) {
     // The body is handed back before it is consumed, so the catch below
     // never sees a stream that breaks mid-way; pipe it through a pass-through
     // whose failure is logged with the submission. The reader still sees the
-    // error (and a short file fails the Content-Length check).
+    // error, and a body shorter than Content-Length is a failed download in
+    // the browser. The admin cancelling the download also ends the pipe,
+    // which is only worth a warning.
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-    void media.body?.pipeTo(writable).catch((error: unknown) => console.error(`Streaming the recording for ${who} failed`, error))
+    void media.body?.pipeTo(writable).catch((error: unknown) => {
+      const aborted = (error as { name?: string } | null)?.name === "AbortError"
+      console[aborted ? "warn" : "error"](`Streaming the recording for ${who} ${aborted ? "was cancelled" : "failed"}`, error)
+    })
     return new Response(media.body ? readable : null, { headers })
   } catch (error) {
     console.error(`Failed to download the recording for ${who}`, error)

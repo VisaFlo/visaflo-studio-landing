@@ -21,19 +21,21 @@ export type StudioRequestMail = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: "camera"
-  /** Absent when the browser sent none: the take was recovered after the page closed mid-recording. */
+  /** Absent when the browser sent none (usually a take recovered after the page closed mid-recording). */
   checks?: RecordingChecks
   consentAt: string
 }
 
+// m:ss, or "length unknown" when the browser sent no usable length.
 function minutes(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "length unknown"
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
 }
 
 export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<void> {
   const folder = entry.recordingPath.slice(0, entry.recordingPath.lastIndexOf("/"))
   const folderUrl = consoleUrl(folder)
-  const checks = entry.checks ? describeChecks(entry.checks) : "checks not recorded (the take was cut off before Finish)"
+  const checks = entry.checks ? describeChecks(entry.checks) : "no checks sent (usually a take recovered after the page closed mid-recording)"
   const email = entry.email
     ? entry.emailVerified
       ? entry.email

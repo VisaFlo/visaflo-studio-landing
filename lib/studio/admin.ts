@@ -3,7 +3,7 @@ import type { RecordingChecks } from "@/lib/studio/checks"
 // The one account that can open /admin and see every Studio submission. The
 // same email is in docs/studio-capture/storage.rules (which compares it
 // exactly, so keep it lower-case), docs/studio-capture/rules-test.mjs and
-// the README: change all four together. The tests import it from here.
+// the README: change all four together. admin-auth.test.ts imports it.
 export const STUDIO_ADMIN_EMAIL = "bkim@vflo.app"
 
 export function isStudioAdmin(email: string | null | undefined): boolean {
@@ -26,7 +26,8 @@ export type Submission = {
   uid: string
   submissionId: string
   /**
-   * "requested": request.json was read and names a topic (team emailed).
+   * "requested": request.json was read and names a topic (the browser then
+   * asks /api/studio/requests to email the team).
    * "recorded": only the recording is there, no request.json yet.
    * "request-unreadable": request.json exists but couldn't be read or has no
    * topic; `problems` has the detail.
@@ -44,8 +45,10 @@ export type Submission = {
   consentAt?: string
   /**
    * The recording file, when the folder has one. `url` plays it in the page
-   * and needs a download token; the download route needs only `name`.
-   * `contentType` and `bytes` come from the object metadata when readable.
+   * and needs a download token; the Download button needs only that a
+   * recording exists (the route finds the file itself from the submission
+   * id, with the admin's token). `contentType` and `bytes` come from the
+   * object metadata when readable.
    */
   recording?: { name: string; url?: string; contentType?: string; bytes?: number }
   consoleUrl: string

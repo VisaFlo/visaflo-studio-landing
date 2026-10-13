@@ -1,6 +1,7 @@
 "use client"
 
 import type { Check, RecordingChecks } from "@/lib/studio/checks"
+import type { RecordingExtension } from "@/lib/studio/project"
 
 // MediaRecorder container the browser can write: MP4 on Safari, WebM on
 // Chrome and Firefox (newer Chrome can do MP4 too, which we prefer).
@@ -17,7 +18,8 @@ export function pickRecordingMime(): string | undefined {
   return MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type))
 }
 
-export function extensionFor(mime: string): string {
+// The file name the upload gets: only what the storage rules accept.
+export function extensionFor(mime: string): RecordingExtension {
   if (mime.includes("mp4")) return "mp4"
   if (mime.includes("quicktime")) return "mov"
   if (mime.includes("x-m4v")) return "m4v"
@@ -35,13 +37,20 @@ export type Recording = {
 }
 
 /** A finished take. `seconds` is how much was actually recorded, from the data the recorder produced. */
-export type StoppedTake = { blob: Blob; mime: string; seconds: number; voiceHeard: Check }
+export type StoppedTake = {
+  blob: Blob
+  mime: string
+  seconds: number
+  voiceHeard: Check
+  /** The recorder reported an error before it stopped, so the take ends early. */
+  cutOff: boolean
+}
 
 export type ActiveRecorder = {
-  /** voiceHeard is null when the mic couldn't be read, not false. */
+  /** voiceHeard is null when the mic couldn't be read for enough of the take to say anything. */
   stop: () => Promise<StoppedTake>
   cancel: () => void
-  /** Mic loudness right now, 0 to about 1. */
+  /** Mic loudness right now, 0 to 1. */
   level: () => number
   /** Whether the person is talking right now (null when the mic can't be read). */
   speaking: () => boolean | null
@@ -52,8 +61,9 @@ export type RecorderOptions = {
   onChunk?: (chunk: Blob, index: number, mime: string) => void
   /**
    * The recorder stopped without being asked: "error" after a MediaRecorder
-   * error (encoder failure, a track that ended when the camera went away),
-   * "ended" when it just stopped. The take is cut off from here on.
+   * error (an encoder or browser failure), "ended" when it just stopped,
+   * which is what the browser does when the camera's tracks end. The take
+   * is cut off from here on.
    */
   onEnded?: (reason: "error" | "ended") => void
 }
@@ -74,10 +84,10 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
     audioBitsPerSecond: 128_000,
   })
   const chunks: Blob[] = []
-  const startedAt = performance.now()
+  let startedAt = 0
   // When the last data arrived: the length of what was really recorded, even
   // if the recorder died while the person kept reading.
-  let lastDataAt = startedAt
+  let lastDataAt = 0
   recorder.ondataavailable = (event) => {
     if (event.data.size === 0) return
     chunks.push(event.data)
@@ -85,6 +95,11 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
     onChunk?.(event.data, chunks.length - 1, recorder.mimeType || mime || "video/webm")
   }
 
+  // Time the mic could be read (the context was running) and, within that,
+  // time a voice was heard. The check needs enough readable time to mean
+  // anything: a context the autoplay policy kept suspended reads silence,
+  // and that is "not checked", never "no voice".
+  let readableMs = 0
   let voiceMs = 0
   let rms = 0
   let micReadable = false
@@ -100,8 +115,6 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
     const context = audio
     let warnedSuspended = false
     timer = window.setInterval(() => {
-      // A context the autoplay policy keeps suspended reads silence; that is
-      // "not checked", never "no voice".
       if (context.state !== "running") {
         micReadable = false
         if (!warnedSuspended && performance.now() - startedAt > 1000) {
@@ -115,34 +128,45 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
       for (const s of samples) sum += s * s
       rms = Math.sqrt(sum / samples.length)
       micReadable = true
+      readableMs += 100
       if (rms > VOICE_RMS) voiceMs += 100
     }, 100)
   } catch (error) {
-    // AudioContext itself couldn't be built (old browser, no Web Audio):
-    // record anyway and report the voice check as not run.
+    // Web Audio couldn't be set up (no AudioContext, or the stream has no
+    // audio track): record anyway and report the voice check as not run.
     console.warn("Mic level can't be read; recording without the voice check", error)
   }
 
+  let cleaned = false
   const cleanup = () => {
+    if (cleaned) return
+    cleaned = true
     window.clearInterval(timer)
-    void audio?.close().catch(() => {})
+    void audio?.close().catch((error: unknown) => console.warn("AudioContext.close failed", error))
   }
 
+  let failed = false
   const finish = (): StoppedTake => {
     cleanup()
     const type = recorder.mimeType || mime || "video/webm"
+    const takeMs = lastDataAt - startedAt
     return {
       blob: new Blob(chunks, { type }),
       mime: type,
-      seconds: Math.round((lastDataAt - startedAt) / 1000),
-      voiceHeard: micReadable ? voiceMs >= VOICE_NEEDED_MS : null,
+      seconds: Math.max(0, Math.round(takeMs / 1000)),
+      // Judged over the whole take, not the last tick, and only when the mic
+      // could be read for at least two seconds and most of the take: a
+      // context interrupted at the end keeps what it heard; one that woke
+      // up for the last moments has nothing to say.
+      voiceHeard: readableMs >= VOICE_NEEDED_MS && readableMs >= takeMs / 2 ? voiceMs >= VOICE_NEEDED_MS : null,
+      cutOff: failed,
     }
   }
 
-  // Installed now, not inside stop(): a recorder that stops on its own must
-  // be noticed, or the clock keeps running over a dead take.
+  // Installed before start(), not inside stop(): a recorder that stops on
+  // its own must be noticed, or the flow keeps the script clock running and
+  // the mic sampler alive over a dead take.
   let stopping: ((take: StoppedTake) => void) | null = null
-  let failed = false
   recorder.onerror = (event) => {
     failed = true
     console.error("MediaRecorder error", (event as { error?: unknown }).error ?? event)
@@ -153,6 +177,16 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
       cleanup()
       onEnded?.(failed ? "error" : "ended")
     }
+  }
+
+  // One-second chunks, so a closed tab loses at most a second. A start()
+  // that throws (this browser can't record the stream) reaches the caller.
+  startedAt = lastDataAt = performance.now()
+  try {
+    recorder.start(1000)
+  } catch (error) {
+    cleanup()
+    throw error
   }
 
   return {

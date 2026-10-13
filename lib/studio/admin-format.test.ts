@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { clipLength, describeProblems, fileInfo, megabytes, when } from "@/lib/studio/admin-format"
+import { clipLength, describeProblems, fileInfo, megabytes, topicFallback, when } from "@/lib/studio/admin-format"
 
 describe("admin formatters", () => {
   it("shows a dash for missing or unreadable times and lengths", () => {
@@ -25,6 +25,11 @@ describe("admin formatters", () => {
   })
   it("formats sizes in megabytes", () => {
     expect(megabytes(51604544)).toBe("49.2 MB")
+  })
+  it("tells an unread request.json from a topic not picked yet", () => {
+    expect(topicFallback("request-unreadable")).toBe("Couldn't read request.json")
+    expect(topicFallback("recorded")).toBe("No topic picked yet")
+    expect(topicFallback("requested")).toBe("No topic picked yet")
   })
 })
 

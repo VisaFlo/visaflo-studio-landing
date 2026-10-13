@@ -47,9 +47,13 @@ describe("adminRequest", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("/api/admin/submissions"), 504, expect.stringContaining("Gateway timeout"))
   })
 
-  it("treats a 200 with the wrong shape as an error", async () => {
+  it("treats a 200 with the wrong shape as an error, and logs the body so it can be looked at", async () => {
     reply(JSON.stringify({ nope: 1 }))
-    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toMatchObject({ status: "error" })
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "The server answered in a form this page doesn't understand. Reload to try again.",
+    })
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("unexpected body"), expect.stringContaining("nope"))
   })
 
   it("maps a dropped connection", async () => {

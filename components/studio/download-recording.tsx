@@ -4,10 +4,7 @@ import { useState } from "react"
 import type { User } from "firebase/auth"
 
 import { ErrorText, PrimaryButton, SecondaryButton } from "@/components/studio/ui"
-import { describeLoadError } from "@/lib/studio/errors"
-
-// What the API said, as opposed to a connection or sign-in failure.
-class ServerError extends Error {}
+import { ApiError, apiError, describeLoadError } from "@/lib/studio/errors"
 
 // Saves a submission's original recording through /api/admin/recording,
 // which needs the admin's token in a header, so it can't be a plain link.
@@ -17,18 +14,19 @@ class ServerError extends Error {}
 async function fetchRecording(user: User, id: string): Promise<{ blob: Blob; filename: string }> {
   const token = await user.getIdToken()
   const response = await fetch(`/api/admin/recording?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } })
-  if (!response.ok) {
-    const raw = await response.text()
-    let message: string | undefined
-    try {
-      message = (JSON.parse(raw) as { error?: string }).error
-    } catch {
-      console.error("/api/admin/recording answered with something other than JSON", response.status, raw.slice(0, 300))
-    }
-    throw new ServerError(message ?? `Download failed (${response.status}).`)
-  }
+  if (!response.ok) throw apiError("/api/admin/recording", response.status, await response.text())
   const filename = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1] ?? "recording.mp4"
-  return { blob: await response.blob(), filename }
+  // The headers arrived, so the connection was fine: a body that fails from
+  // here is the bucket read breaking mid-way (the route logs it), not the
+  // admin's internet.
+  let blob: Blob
+  try {
+    blob = await response.blob()
+  } catch (error) {
+    console.error(`Download of ${id} was cut off`, error)
+    throw new ApiError("The download was cut off before the file finished. Try again; if it keeps happening, open the folder in Firebase.")
+  }
+  return { blob, filename }
 }
 
 export function DownloadRecording({
@@ -60,7 +58,7 @@ export function DownloadRecording({
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
       console.error(`Download of ${id} failed`, e)
-      setError(e instanceof ServerError ? e.message : describeLoadError(e))
+      setError(e instanceof ApiError ? e.message : describeLoadError(e))
     } finally {
       setBusy(false)
     }

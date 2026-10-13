@@ -1,6 +1,6 @@
 import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
 import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
-import { isEmail, readRequestJson, type RequestJson } from "@/lib/studio/request-json"
+import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
 import { consoleUrl, firstDownloadToken, listObjects, mediaUrl, storageJson, storageMeta, StorageError } from "@/lib/studio/storage"
 
 export type SubmissionRef = { uid: string; submissionId: string }
@@ -61,9 +61,16 @@ async function readSubmission(token: string, ref: SubmissionRef, items: string[]
     return undefined
   }
 
+  // readRequestJson turns anything that isn't an object into {}, which would
+  // read here as "no topic"; name the real shape instead.
+  const asObject = (raw: unknown): RequestJson => {
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) return readRequestJson(raw)
+    throw new Error(`request.json is ${Array.isArray(raw) ? "an array" : raw === null ? "null" : `a ${typeof raw}`}, not an object`)
+  }
+
   const [meta, details] = await Promise.all([
     recording ? storageMeta(token, recording).catch(unreadable("meta-unreadable", "the recording's metadata")) : undefined,
-    request ? storageJson<unknown>(token, request).then(readRequestJson).catch(unreadable("request-unreadable", "request.json")) : undefined,
+    request ? storageJson<unknown>(token, request).then(asObject).catch(unreadable("request-unreadable", "request.json")) : undefined,
   ])
 
   if (recording) submission.recording = { name: recording }
@@ -71,9 +78,8 @@ async function readSubmission(token: string, ref: SubmissionRef, items: string[]
   if (submission.recording && meta) {
     submission.recordedAt = meta.timeCreated
     // The uploader's browser wrote these; same guards as request.json.
-    submission.email = isEmail(meta.metadata?.email)
-    const seconds = Number(meta.metadata?.seconds)
-    if (Number.isFinite(seconds) && seconds > 0) submission.seconds = Math.round(seconds)
+    submission.email = asEmail(meta.metadata?.email)
+    submission.seconds = seconds(meta.metadata?.seconds)
     if (meta.contentType) submission.recording.contentType = meta.contentType
     const bytes = Number(meta.size)
     if (Number.isFinite(bytes) && bytes > 0) submission.recording.bytes = bytes

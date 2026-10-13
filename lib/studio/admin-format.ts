@@ -29,6 +29,11 @@ export function submissionHref(id: string): string {
   return `/admin/${id}`
 }
 
+// What the Topic cell says when there is no topic.
+export function topicFallback(status: Submission["status"]): string {
+  return status === "request-unreadable" ? "Couldn't read request.json" : "No topic picked yet"
+}
+
 const PROBLEM_TEXT: Record<SubmissionProblem["kind"], string> = {
   "no-recording": "No recording file in this folder",
   "no-token": "The recording has no download token, so it can't play here; use Download recording",

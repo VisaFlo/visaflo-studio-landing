@@ -30,6 +30,12 @@ export async function adminRequest<T>(user: User, path: AdminPath, pick: (body: 
     if (body.code === UNVERIFIED_CODE) return { status: "unverified" }
     const data = response.ok ? pick(body) : undefined
     if (data === undefined) {
+      if (response.ok) {
+        // Valid JSON, wrong shape: the API and this page disagree, which a
+        // reload won't fix, so keep the body for whoever looks.
+        console.error(`${path} answered ${response.status} with an unexpected body`, raw.slice(0, 300))
+        return { status: "error", message: "The server answered in a form this page doesn't understand. Reload to try again." }
+      }
       return { status: "error", message: typeof body.error === "string" ? body.error : `Request failed (${response.status}). Reload to try again.` }
     }
     return { status: "ready", data }

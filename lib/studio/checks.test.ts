@@ -12,6 +12,7 @@ describe("parseChecks", () => {
     expect(parseChecks(undefined)).toBeUndefined()
     expect(parseChecks(null)).toBeUndefined()
     expect(parseChecks("x")).toBeUndefined()
+    expect(parseChecks([])).toBeUndefined()
   })
 })
 

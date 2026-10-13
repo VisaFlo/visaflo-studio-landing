@@ -5,7 +5,8 @@ import type { FaceLandmarker } from "@mediapipe/tasks-vision"
 import { portraitCrop } from "@/lib/studio/portrait"
 
 // MediaPipe Face Landmarker, loaded on demand so the landing page never pays
-// for it. The WASM runtime is pinned to the installed package version.
+// for it. The WASM runtime is pinned to 1.1.0; bump WASM_BASE and the
+// @mediapipe/tasks-vision version in package.json together.
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm"
 const MODEL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
@@ -25,8 +26,9 @@ export function loadFaceLandmarker(): Promise<FaceLandmarker> {
     try {
       return await create("GPU")
     } catch (error) {
-      // CPU is slower and warmer, and more likely to miss frames; worth knowing
-      // when a device's recordings keep saying the check didn't run.
+      // CPU is slower and warmer; a device that keeps coming back with the
+      // face check not run (the 20 s give-up) or failing is worth matching
+      // against this line.
       console.warn("Face landmarker GPU delegate failed, using CPU", error)
       return await create("CPU")
     }

@@ -22,13 +22,12 @@ import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
 import { faceVerdict, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
-import { describeSubmitError } from "@/lib/studio/errors"
+import { ApiError, describeSubmitError } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording } from "@/lib/studio/recorder"
 import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
 import {
-  ApiError,
   lastSent,
   newSubmissionId,
   rememberSent,
@@ -54,9 +53,13 @@ type Step =
 type UploadState = {
   status: "idle" | "uploading" | "done" | "failed"
   progress: number
-  /** Why it failed: a dropped connection, or the server refusing the file. */
-  reason?: "network" | "refused"
+  /** Why it failed: a dropped connection, the server refusing the file, or something else (`code` says what). */
+  reason?: "network" | "refused" | "other"
+  code?: string
 }
+
+/** How long Finish waits for the recorder's final data before giving the take up as stuck. */
+const STOP_TIMEOUT_MS = 5000
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
@@ -242,8 +245,10 @@ export function CaptureFlow() {
   }
 
   // Every take is saved chunk by chunk as it records (see take-store).
-  function recordTake(media: MediaStream): ActiveRecorder | null {
-    if (!user) return null
+  function recordTake(media: MediaStream): ActiveRecorder {
+    // The align step only renders with a user; a take without one would leave
+    // Finish dead, so fail loudly into beginScript's catch instead.
+    if (!user) throw new Error("No signed-in user to record for")
     const takeId = crypto.randomUUID()
     void beginTake({
       uid: user.uid,
@@ -297,10 +302,27 @@ export function CaptureFlow() {
     recorder.current = null
     if (!active) return
     const finishing = take.current
-    const result = await active.stop()
+    // A recorder whose stop event never comes (a browser bug) would leave
+    // Finish dead; give it a few seconds, then treat the take as lost.
+    const result = await Promise.race([
+      active.stop(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), STOP_TIMEOUT_MS)),
+    ])
     // Start over was pressed (or the camera gave out) while this clip was
     // finishing: that decision wins.
     if (take.current !== finishing) return
+    if (!result) {
+      console.error("The recorder didn't finish in time")
+      abandonCamera("Recording didn't finish. Try again, or open this page in Chrome or Safari, or on your phone.")
+      return
+    }
+    if (result.blob.size === 0) {
+      // A recorder that produced nothing must not reach the review as a
+      // black clip that can be submitted.
+      console.error("The recorder produced no data", { seconds: result.seconds, mime: result.mime })
+      abandonCamera("Nothing was recorded. Try again, or open this page in Chrome or Safari, or on your phone.")
+      return
+    }
     stopCamera()
     const checks: RecordingChecks = { faceSeen: faceVerdict(faceFrames.current, alignFaceSeen.current), voiceHeard: result.voiceHeard }
     if (user) void finishTake(user.uid, { seconds: result.seconds, checks })
@@ -316,9 +338,9 @@ export function CaptureFlow() {
       }
     })
     setReviewError(null)
-    setReviewNotice(null)
+    setReviewNotice(result.cutOff ? "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again." : null)
     setStep("review")
-  }, [stopCamera, user])
+  }, [abandonCamera, stopCamera, user])
 
   function startUpload(current: User, rec: Recording) {
     upload.current?.cancel()
@@ -331,16 +353,27 @@ export function CaptureFlow() {
     handle.done
       .then(() => setUploadState({ status: "done", progress: 1 }))
       .catch((error: unknown) => {
-        if ((error as { code?: string })?.code === "storage/canceled") return
-        console.error("Upload failed", error)
         const code = (error as { code?: string })?.code ?? ""
-        const refused = code === "storage/unauthorized" || code === "storage/unauthenticated"
-        setUploadState((s) => ({ status: "failed", progress: s.progress, reason: refused ? "refused" : "network" }))
+        if (code === "storage/canceled") return
+        console.error("Upload failed", error)
+        // Only a retry-fixable failure is called a connection problem; the
+        // rules refusing the file is a sign-in matter; anything else is named.
+        const reason =
+          code === "storage/unauthorized" || code === "storage/unauthenticated"
+            ? "refused"
+            : code === "storage/retry-limit-exceeded" || code === "storage/unknown" || !code
+              ? "network"
+              : "other"
+        setUploadState((s) => ({ status: "failed", progress: s.progress, reason, code }))
       })
   }
 
   function submitRecording() {
     if (!user || !recording) return
+    if (recording.blob.size === 0) {
+      setReviewError("This recording is empty. Record again.")
+      return
+    }
     if (recording.blob.size > MAX_UPLOAD_BYTES) {
       setReviewError("This recording is over 500 MB. Record again and keep it to about a minute and a half.")
       return
@@ -704,6 +737,11 @@ function UploadBanner({ state, onRetry }: { state: UploadState; onRetry: () => v
                 <span className="text-stone-600">
                   Sign out and back in, then retry. Still stuck? Email info@vflo.app.
                 </span>
+              </span>
+            ) : state.reason === "other" ? (
+              <span className="flex-grow">
+                <span className="font-medium">We couldn&apos;t save your recording ({state.code}).</span>{" "}
+                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
               </span>
             ) : (
               <span className="flex-grow">

@@ -53,6 +53,7 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
             // first one is logged so a real fault isn't invisible.
             if (failures === 0) console.warn("Face tracking frame failed", error)
             if (++failures >= 30) {
+              console.error("Face tracking gave up after 30 failed frames in a row", error)
               cancelAnimationFrame(raf)
               setStatus("unavailable")
             }

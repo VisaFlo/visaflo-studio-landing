@@ -159,6 +159,18 @@ describe("loadSubmission", () => {
     expect(quiet).toHaveBeenCalledWith(expect.stringContaining("request.json in studio/u1/s1"), expect.anything())
   })
 
+  it("says what a request.json that isn't an object was, rather than blaming a missing topic", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    fakeBucket({
+      listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
+      meta: { "studio/u1/s1/recording.mp4": META },
+      media: { "studio/u1/s1/request.json": ["x"] },
+    })
+    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    expect(s?.status).toBe("request-unreadable")
+    expect(s?.problems).toEqual([{ kind: "request-unreadable", detail: "request.json is an array, not an object" }])
+  })
+
   it("doesn't call a request.json without a topic a picked topic", async () => {
     fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
@@ -220,16 +232,22 @@ describe("loadSubmissions", () => {
     expect(quiet).toHaveBeenCalledWith(expect.stringContaining("studio/u1/has space/"))
   })
 
-  it("reads every folder when there are more than one batch of them", async () => {
-    const ids = Array.from({ length: 23 }, (_, i) => `s${String(i).padStart(2, "0")}`)
-    const bucket: Bucket = { listings: { "studio/": { prefixes: ["studio/u1/"] }, "studio/u1/": { prefixes: ids.map((id) => `studio/u1/${id}/`) } }, meta: {} }
-    for (const id of ids) {
-      bucket.listings[`studio/u1/${id}/`] = { items: [`studio/u1/${id}/recording.mp4`] }
-      bucket.meta![`studio/u1/${id}/recording.mp4`] = { ...META, timeCreated: `2026-10-${String(1 + (ids.length - 1 - ids.indexOf(id)) % 28).padStart(2, "0")}T00:00:00.000Z` }
+  it("reads every folder when both the people and their submissions run past one batch", async () => {
+    // 12 people × 2 submissions: more than one batch at each level.
+    const uids = Array.from({ length: 12 }, (_, i) => `u${String(i).padStart(2, "0")}`)
+    const bucket: Bucket = { listings: { "studio/": { prefixes: uids.map((uid) => `studio/${uid}/`) } }, meta: {} }
+    const expected: string[] = []
+    for (const uid of uids) {
+      bucket.listings[`studio/${uid}/`] = { prefixes: [`studio/${uid}/a/`, `studio/${uid}/b/`] }
+      for (const id of ["a", "b"]) {
+        bucket.listings[`studio/${uid}/${id}/`] = { items: [`studio/${uid}/${id}/recording.mp4`] }
+        bucket.meta![`studio/${uid}/${id}/recording.mp4`] = META
+        expected.push(`${uid}/${id}`)
+      }
     }
     fakeBucket(bucket)
     const loaded = await loadSubmissions("t")
-    expect(loaded.map((s) => s.submissionId).sort()).toEqual(ids)
+    expect(loaded.map((s) => s.id).sort()).toEqual(expected)
   })
 
   it("is empty when nobody has recorded", async () => {
