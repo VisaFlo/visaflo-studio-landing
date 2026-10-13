@@ -65,15 +65,12 @@ and request a sample video.
    `firebase-adminsdk` one has the Storage and Firestore access it needs).
    Paste the key as it appears in the JSON file, `\n`s and all. Without them
    `/admin` says which variable is missing.
-2. **Storage rules** (Firebase console or CLI, project owner): publish
-   `storage.rules` from this folder to the `devdashboard-c9159-ca` bucket. It
-   is the live ruleset plus one `studio/` block (a person writes their own
-   recording and request.json); nothing else changes. Publishing replaces
-   the whole ruleset, so diff it against the console's current rules first
-   (the non-studio parts matched the console on 2026-10-08; the studio
-   blocks were last published 2026-10-10 with an admin read and write,
-   which this version drops). The admin pages work either way, since they
-   don't go through the rules.
+2. **Storage rules**: `storage.rules` from this folder is live on the
+   `devdashboard-c9159-ca` bucket (published 2026-10-13, ruleset
+   `28a27394…`; the one before it, with the admin read and write, was
+   `148c885f…`). Publishing replaces the whole ruleset, so diff it against
+   the live rules before publishing a change (they matched outside the
+   studio blocks on 2026-10-13).
 3. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
    email and password sign-in doesn't need an authorized domain.
 
