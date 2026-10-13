@@ -6,6 +6,8 @@
 export const PROJECT_ID = "devdashboard-c9159"
 /** Canada-region bucket, the one VisaFlo moved to in 2026-09. */
 export const BUCKET = "devdashboard-c9159-ca"
+/** The named Firestore database VisaFlo's live data is in (the (default) one is frozen). */
+export const FIRESTORE_DATABASE_ID = "ca-dryrun"
 
 // Containers MediaRecorder produces (mp4 on Safari and newer Chrome, webm
 // elsewhere) plus the QuickTime names. docs/studio-capture/storage.rules

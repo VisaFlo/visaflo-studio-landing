@@ -1,7 +1,7 @@
 // Storage rules matrix for studio/{uid}/... Run against the emulators; see README.md.
 import { initializeApp, deleteApp } from "firebase/app"
 import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut } from "firebase/auth"
-import { getStorage, connectStorageEmulator, ref, uploadBytes, getBytes, list } from "firebase/storage"
+import { getStorage, connectStorageEmulator, ref, uploadBytes, getBytes, list, deleteObject } from "firebase/storage"
 
 const app = initializeApp({ apiKey: "demo-key", projectId: "demo-studio", storageBucket: "devdashboard-c9159-ca", appId: "x" })
 const auth = getAuth(app); connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true })
@@ -39,46 +39,30 @@ for (const [expect, label, who, path, data, contentType] of cases) {
 await as(`sdk-a-${stamp}@example.test`)
 try { await getBytes(ref(st, `studio/${a}/s1/recording.webm`)); console.log("FAIL read own: ALLOW"); fail++ } catch (e) { console.log(`ok   read own: ${e.code === "storage/unauthorized" ? "DENY" : e.code}`) }
 
-// The Studio admin (/admin) reads and lists everything under studio/, but
-// only once their email is verified.
-const ADMIN = "bkim@vflo.app"
+// No browser token reads, lists or deletes under studio/, not even a
+// verified VisaFlo staff address: /admin goes through the server and its
+// service account (lib/studio/admin-firebase.ts).
+const STAFF = "bkim@vflo.app"
 await signOut(auth)
-const adminUid = await createUserWithEmailAndPassword(auth, ADMIN, "password123").then((c) => c.user.uid, async () => (await (await import("firebase/auth")).signInWithEmailAndPassword(auth, ADMIN, "password123")).user.uid)
-async function setVerified(verified) {
-  const res = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-studio/accounts:update", {
-    method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ localId: adminUid, emailVerified: verified }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
-async function adminRead(expect, label) {
-  await as(ADMIN)
+const staffUid = await createUserWithEmailAndPassword(auth, STAFF, "password123").then((c) => c.user.uid, async () => (await (await import("firebase/auth")).signInWithEmailAndPassword(auth, STAFF, "password123")).user.uid)
+const verify = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-studio/accounts:update", {
+  method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ localId: staffUid, emailVerified: true }),
+})
+if (!verify.ok) throw new Error(await verify.text())
+async function denied(label, attempt) {
   let got
-  try { await getBytes(ref(st, `studio/${a}/s1/recording.webm`)); await list(ref(st, "studio/")); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
-  if (got !== expect) fail++
-  console.log(`${got === expect ? "ok  " : "FAIL"} ${label}: ${got}`)
+  try { await attempt(); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
+  if (got !== "DENY") fail++
+  console.log(`${got === "DENY" ? "ok  " : "FAIL"} ${label}: ${got}`)
 }
-await setVerified(false)
-await adminRead("DENY", "admin, email not verified, read + list")
-await setVerified(true)
-await adminRead("ALLOW", "admin, email verified, read + list")
-
-// Nobody writes outside their own recording and request.json: not the
-// admin (read-only, so a stolen admin token can't touch recordings), not
-// the owner into a sibling file.
-async function tryWrite(label, path, expect) {
-  let got
-  try { await uploadBytes(ref(st, path), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
-  if (got !== expect) fail++
-  console.log(`${got === expect ? "ok  " : "FAIL"} ${label}: ${got}`)
-}
-await as(ADMIN)
-await tryWrite("admin writes extra.json next to a recording", `studio/${a}/s1/extra.json`, "DENY")
-await setVerified(false)
-await as(ADMIN)
-await tryWrite("unverified admin writes extra.json", `studio/${a}/s1/extra.json`, "DENY")
-await setVerified(true)
+await as(STAFF)
+await denied("verified staff reads a recording", () => getBytes(ref(st, `studio/${a}/s1/recording.webm`)))
+await denied("verified staff lists studio/", () => list(ref(st, "studio/")))
+await denied("verified staff deletes a recording", () => deleteObject(ref(st, `studio/${a}/s1/recording.webm`)))
+await denied("verified staff writes extra.json next to a recording", () => uploadBytes(ref(st, `studio/${a}/s1/extra.json`), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }))
 await as(`sdk-a-${stamp}@example.test`)
-await tryWrite("owner writes extra.json next to their recording", `studio/${a}/s1/extra.json`, "DENY")
+await denied("owner deletes their own recording", () => deleteObject(ref(st, `studio/${a}/s1/recording.webm`)))
+await denied("owner writes extra.json next to their recording", () => uploadBytes(ref(st, `studio/${a}/s1/extra.json`), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }))
 await as(`sdk-b-${stamp}@example.test`)
 try { await list(ref(st, "studio/")); console.log("FAIL other user lists studio/: ALLOW"); fail++ } catch (e) { console.log(`ok   other user lists studio/: ${e.code === "storage/unauthorized" ? "DENY" : e.code}`) }
 console.log(fail ? `${fail} FAILED` : "all passed")

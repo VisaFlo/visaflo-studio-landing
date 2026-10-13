@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { requireAdmin } from "@/lib/studio/admin-auth"
-import { fakeBucket } from "@/lib/studio/test-bucket"
+import { fakeBucket, type Bucket } from "@/lib/studio/test-bucket"
 
 import { GET } from "./route"
 
@@ -9,14 +9,19 @@ vi.mock("@/lib/studio/admin-auth", () => ({ requireAdmin: vi.fn() }))
 
 const admin = vi.mocked(requireAdmin)
 const get = (id: string) => GET(new Request(`http://x/api/admin/recording?id=${id}`, { headers: { authorization: "Bearer t" } }))
+// The bucket the admin gate hands the route.
+const serve = (objects: Bucket) => {
+  const bucket = fakeBucket(objects)
+  admin.mockResolvedValue({ user: { uid: "a", emailVerified: true }, bucket })
+  return bucket
+}
 
 describe("GET /api/admin/recording", () => {
   beforeEach(() => {
-    admin.mockResolvedValue({ user: { uid: "a", email: "bkim@vflo.app", emailVerified: true }, token: "t" })
+    serve({ listings: {} })
     vi.spyOn(console, "error").mockImplementation(() => {})
   })
   afterEach(() => {
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -26,24 +31,19 @@ describe("GET /api/admin/recording", () => {
   })
 
   it("is 404 without a recording", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } } })
+    serve({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } } })
     expect((await get("u1/s1")).status).toBe(404)
   })
 
   it("streams the file as a private attachment named after the person, passing the type and length through", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = new URL(String(input))
-        if (url.pathname.endsWith("/o")) {
-          return Response.json({ items: [{ name: "studio/u1/s1/recording.webm" }, { name: "studio/u1/s1/request.json" }] })
-        }
-        if (url.pathname.includes("request.json")) return Response.json({ name: 'Dan"; x=y' })
-        return new Response("hello", { headers: { "content-type": "video/webm", "content-length": "5" } })
-      }),
-    )
+    const bucket = serve({
+      listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.webm", "studio/u1/s1/request.json"] } },
+      media: { "studio/u1/s1/request.json": { name: 'Dan"; x=y' } },
+    })
+    bucket.read.mockResolvedValue({ body: new Response("hello").body!, contentType: "video/webm", length: 5 })
     const response = await get("u1/s1")
     expect(response.status).toBe(200)
+    expect(bucket.read).toHaveBeenCalledWith("studio/u1/s1/recording.webm")
     expect(response.headers.get("content-disposition")).toBe('attachment; filename="dan-x-y-s1.webm"')
     expect(response.headers.get("content-type")).toBe("video/webm")
     expect(response.headers.get("content-length")).toBe("5")
@@ -51,8 +51,8 @@ describe("GET /api/admin/recording", () => {
     expect(await response.text()).toBe("hello")
   })
 
-  it("downloads a recorded-only folder quietly, named by uid, with a default type and no made-up length", async () => {
-    fakeBucket({
+  it("downloads a recorded-only folder quietly, named by uid, with no made-up length", async () => {
+    serve({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } },
       media: { "studio/u1/s1/recording.mp4": "bytes" },
     })
@@ -60,12 +60,19 @@ describe("GET /api/admin/recording", () => {
     expect(response.status).toBe(200)
     expect(response.headers.get("content-disposition")).toBe('attachment; filename="u1-s1.mp4"')
     expect(response.headers.get("content-type")).toBe("text/plain")
+    expect(response.headers.get("content-length")).toBeNull()
     expect(await response.text()).toBe("bytes")
     expect(console.error).not.toHaveBeenCalled()
   })
 
+  it("falls back to video/mp4 when the object has no type", async () => {
+    const bucket = serve({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } } })
+    bucket.read.mockResolvedValue({ body: new Response("x").body! })
+    expect((await get("u1/s1")).headers.get("content-type")).toBe("video/mp4")
+  })
+
   it("still downloads, named by uid, when request.json can't be read, and logs why", async () => {
-    fakeBucket({
+    serve({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       media: { "studio/u1/s1/request.json": 500, "studio/u1/s1/recording.mp4": "bytes" },
     })
@@ -76,45 +83,37 @@ describe("GET /api/admin/recording", () => {
   })
 
   it("logs a stream that breaks mid-body with the submission it was for", async () => {
-    const broken = () =>
-      new ReadableStream({
+    const bucket = serve({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } } })
+    bucket.read.mockResolvedValue({
+      body: new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode("part"))
           controller.error(new Error("upstream reset"))
         },
-      })
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = new URL(String(input))
-        if (url.pathname.endsWith("/o")) return Response.json({ items: [{ name: "studio/u1/s1/recording.mp4" }] })
-        if (url.pathname.includes("request.json")) return new Response("not found", { status: 404 })
-        return new Response(broken(), { headers: { "content-type": "video/mp4" } })
       }),
-    )
+      contentType: "video/mp4",
+    })
     const response = await get("u1/s1")
     expect(response.status).toBe(200)
     await expect(response.text()).rejects.toThrow()
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Streaming the recording for u1/s1"), expect.anything())
   })
 
-  it("tells rules problems from sign-in problems from the rest", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": 403 } })
+  it("tells a refused service account from the rest", async () => {
+    serve({ listings: { "studio/u1/s1/": 403 } })
     const refused = await get("u1/s1")
     expect(refused.status).toBe(502)
-    expect(((await refused.json()) as { error: string }).error).toContain("storage.rules")
+    expect(((await refused.json()) as { error: string }).error).toContain("service account")
 
-    fakeBucket({ listings: { "studio/u1/s1/": 401 } })
-    expect((await get("u1/s1")).status).toBe(401)
+    serve({ listings: { "studio/u1/s1/": 401 } })
+    expect((await get("u1/s1")).status).toBe(502)
 
-    fakeBucket({ listings: { "studio/u1/s1/": 500 } })
+    serve({ listings: { "studio/u1/s1/": 500 } })
     expect((await get("u1/s1")).status).toBe(500)
   })
 
-  it("passes the admin gate's own response through without touching Storage", async () => {
+  it("passes the admin gate's own response through", async () => {
     admin.mockResolvedValue(Response.json({ error: "no" }, { status: 403 }))
-    const fetch = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } } })
     expect((await get("u1/s1")).status).toBe(403)
-    expect(fetch).not.toHaveBeenCalled()
   })
 })

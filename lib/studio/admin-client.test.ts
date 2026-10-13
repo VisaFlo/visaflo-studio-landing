@@ -21,17 +21,18 @@ describe("adminRequest", () => {
     vi.restoreAllMocks()
   })
 
-  it("asks for a fresh token and sends it as Bearer", async () => {
+  it("sends the token as Bearer", async () => {
     const fetch = reply(JSON.stringify({ items: ["a"] }))
-    const u = user("fresh")
-    expect(await adminRequest(u, "/api/admin/submissions", pick)).toEqual({ status: "ready", data: ["a"] })
-    expect(u.getIdToken).toHaveBeenCalledWith(true)
-    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer fresh" } })
+    expect(await adminRequest(user("the-token"), "/api/admin/submissions", pick)).toEqual({ status: "ready", data: ["a"] })
+    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer the-token" } })
   })
 
-  it("shows the verify panel on code=unverified whatever the status", async () => {
-    reply(JSON.stringify({ error: "Verify your email first.", code: "unverified" }), 403)
-    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({ status: "unverified" })
+  it("shows a non-master the gate's own message", async () => {
+    reply(JSON.stringify({ error: "This page is only for VisaFlo master accounts." }), 403)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "This page is only for VisaFlo master accounts.",
+    })
   })
 
   it("surfaces the server's own error, else the status, and logs a body that isn't JSON", async () => {

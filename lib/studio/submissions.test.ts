@@ -72,12 +72,12 @@ describe("loadSubmission", () => {
   })
 
   it("assembles a full folder, request.json winning over the recording's metadata", async () => {
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       meta: { "studio/u1/s1/recording.mp4": META },
       media: { "studio/u1/s1/request.json": REQUEST },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s).toMatchObject({
       id: "u1/s1",
       status: "requested",
@@ -95,50 +95,50 @@ describe("loadSubmission", () => {
 
   it("falls back to the recording's metadata for what request.json leaves out", async () => {
     const partial = Object.fromEntries(Object.entries(REQUEST).filter(([key]) => key !== "email" && key !== "recordingSeconds"))
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       meta: { "studio/u1/s1/recording.mp4": META },
       media: { "studio/u1/s1/request.json": partial },
     })
-    expect(await loadSubmission("t", { uid: "u1", submissionId: "s1" })).toMatchObject({ status: "requested", email: "meta@x", seconds: 61 })
+    expect(await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })).toMatchObject({ status: "requested", email: "meta@x", seconds: 61 })
   })
 
   it("reads a recording-only folder from the object metadata", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.webm"] } }, meta: { "studio/u1/s1/recording.webm": META } })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const bucket = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.webm"] } }, meta: { "studio/u1/s1/recording.webm": META } })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s).toMatchObject({ status: "recorded", email: "meta@x", seconds: 61, problems: [] })
     expect(s?.requestedAt).toBeUndefined()
   })
 
   it("reads the uploader's own metadata as carefully as request.json", async () => {
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.webm"] } },
       meta: { "studio/u1/s1/recording.webm": { ...META, size: "big", metadata: { email: "x@y.com?bcc=evil@z.com", seconds: "lots" } } },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s?.email).toBeUndefined()
     expect(s?.seconds).toBeUndefined()
     expect(s?.recording?.bytes).toBeUndefined()
   })
 
   it("is null for a folder with nothing in it", async () => {
-    fakeBucket({ listings: {} })
-    expect(await loadSubmission("t", { uid: "u1", submissionId: "nope" })).toBeNull()
+    const bucket = fakeBucket({ listings: {} })
+    expect(await loadSubmission(bucket, { uid: "u1", submissionId: "nope" })).toBeNull()
   })
 
   it("keeps the request when the recording is missing, and says so", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } }, media: { "studio/u1/s1/request.json": REQUEST } })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const bucket = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/request.json"] } }, media: { "studio/u1/s1/request.json": REQUEST } })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s).toMatchObject({ status: "requested", name: "Dan Jeong", problems: [{ kind: "no-recording" }] })
     expect(s?.recording).toBeUndefined()
   })
 
   it("has no player without a download token but still offers the file and knows when it was recorded", async () => {
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } },
       meta: { "studio/u1/s1/recording.mp4": { ...META, downloadTokens: undefined } },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s?.recording).toEqual({ name: "studio/u1/s1/recording.mp4", contentType: "video/mp4", bytes: 1234 })
     expect(s?.recordedAt).toBe(META.timeCreated)
     expect(s?.problems).toEqual([{ kind: "no-token" }])
@@ -146,12 +146,12 @@ describe("loadSubmission", () => {
 
   it("reports an unreadable recording or request without losing the other half", async () => {
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {})
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       meta: { "studio/u1/s1/recording.mp4": 500 },
       media: { "studio/u1/s1/request.json": "not json" },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s?.problems.map((p) => p.kind).sort()).toEqual(["meta-unreadable", "request-unreadable"])
     expect(s?.problems.find((p) => p.kind === "meta-unreadable")?.detail).toContain("500")
     expect(s?.status).toBe("request-unreadable")
@@ -161,33 +161,33 @@ describe("loadSubmission", () => {
 
   it("says what a request.json that isn't an object was, rather than blaming a missing topic", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       meta: { "studio/u1/s1/recording.mp4": META },
       media: { "studio/u1/s1/request.json": ["x"] },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s?.status).toBe("request-unreadable")
     expect(s?.problems).toEqual([{ kind: "request-unreadable", detail: "request.json is an array, not an object" }])
   })
 
   it("doesn't call a request.json without a topic a picked topic", async () => {
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4", "studio/u1/s1/request.json"] } },
       meta: { "studio/u1/s1/recording.mp4": META },
       media: { "studio/u1/s1/request.json": { name: "Dan" } },
     })
-    const s = await loadSubmission("t", { uid: "u1", submissionId: "s1" })
+    const s = await loadSubmission(bucket, { uid: "u1", submissionId: "s1" })
     expect(s?.status).toBe("request-unreadable")
     expect(s?.name).toBe("Dan")
     expect(s?.problems).toEqual([{ kind: "request-unreadable", detail: "no topicTitle" }])
   })
 
-  it("lets a refused read (rules not published, or a dead token) reach the route instead of hiding it per file", async () => {
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } }, meta: { "studio/u1/s1/recording.mp4": 403 } })
-    await expect(loadSubmission("t", { uid: "u1", submissionId: "s1" })).rejects.toBeInstanceOf(StorageError)
-    fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } }, meta: { "studio/u1/s1/recording.mp4": 401 } })
-    await expect(loadSubmission("t", { uid: "u1", submissionId: "s1" })).rejects.toMatchObject({ status: 401 })
+  it("lets a refused read (the service account's credentials or IAM) reach the route instead of hiding it per file", async () => {
+    const refused = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } }, meta: { "studio/u1/s1/recording.mp4": 403 } })
+    await expect(loadSubmission(refused, { uid: "u1", submissionId: "s1" })).rejects.toBeInstanceOf(StorageError)
+    const bucket = fakeBucket({ listings: { "studio/u1/s1/": { items: ["studio/u1/s1/recording.mp4"] } }, meta: { "studio/u1/s1/recording.mp4": 401 } })
+    await expect(loadSubmission(bucket, { uid: "u1", submissionId: "s1" })).rejects.toMatchObject({ status: 401 })
   })
 })
 
@@ -198,7 +198,7 @@ describe("loadSubmissions", () => {
   })
 
   it("walks every uid and submission, newest first by request then recording time", async () => {
-    const bucket: Bucket = {
+    const objects: Bucket = {
       listings: {
         "studio/": { prefixes: ["studio/u1/", "studio/u2/"] },
         "studio/u1/": { prefixes: ["studio/u1/old/", "studio/u1/new/"] },
@@ -214,13 +214,12 @@ describe("loadSubmissions", () => {
       },
       media: { "studio/u1/new/request.json": { ...REQUEST, createdAt: "2026-10-09T00:00:00.000Z" } },
     }
-    fakeBucket(bucket)
-    expect((await loadSubmissions("t")).map((s) => s.id)).toEqual(["u1/new", "u2/mid", "u1/old"])
+    expect((await loadSubmissions(fakeBucket(objects))).map((s) => s.id)).toEqual(["u1/new", "u2/mid", "u1/old"])
   })
 
   it("skips a folder that isn't uid/submissionId and keeps the rest", async () => {
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {})
-    fakeBucket({
+    const bucket = fakeBucket({
       listings: {
         "studio/": { prefixes: ["studio/u1/"] },
         "studio/u1/": { prefixes: ["studio/u1/ok/", "studio/u1/has space/"] },
@@ -228,30 +227,29 @@ describe("loadSubmissions", () => {
       },
       meta: { "studio/u1/ok/recording.mp4": META },
     })
-    expect((await loadSubmissions("t")).map((s) => s.id)).toEqual(["u1/ok"])
+    expect((await loadSubmissions(bucket)).map((s) => s.id)).toEqual(["u1/ok"])
     expect(quiet).toHaveBeenCalledWith(expect.stringContaining("studio/u1/has space/"))
   })
 
   it("reads every folder when both the people and their submissions run past one batch", async () => {
     // 12 people × 2 submissions: more than one batch at each level.
     const uids = Array.from({ length: 12 }, (_, i) => `u${String(i).padStart(2, "0")}`)
-    const bucket: Bucket = { listings: { "studio/": { prefixes: uids.map((uid) => `studio/${uid}/`) } }, meta: {} }
+    const objects: Bucket = { listings: { "studio/": { prefixes: uids.map((uid) => `studio/${uid}/`) } }, meta: {} }
     const expected: string[] = []
     for (const uid of uids) {
-      bucket.listings[`studio/${uid}/`] = { prefixes: [`studio/${uid}/a/`, `studio/${uid}/b/`] }
+      objects.listings[`studio/${uid}/`] = { prefixes: [`studio/${uid}/a/`, `studio/${uid}/b/`] }
       for (const id of ["a", "b"]) {
-        bucket.listings[`studio/${uid}/${id}/`] = { items: [`studio/${uid}/${id}/recording.mp4`] }
-        bucket.meta![`studio/${uid}/${id}/recording.mp4`] = META
+        objects.listings[`studio/${uid}/${id}/`] = { items: [`studio/${uid}/${id}/recording.mp4`] }
+        objects.meta![`studio/${uid}/${id}/recording.mp4`] = META
         expected.push(`${uid}/${id}`)
       }
     }
-    fakeBucket(bucket)
-    const loaded = await loadSubmissions("t")
+    const loaded = await loadSubmissions(fakeBucket(objects))
     expect(loaded.map((s) => s.id).sort()).toEqual(expected)
   })
 
   it("is empty when nobody has recorded", async () => {
-    fakeBucket({ listings: { "studio/": {} } })
-    expect(await loadSubmissions("t")).toEqual([])
+    const bucket = fakeBucket({ listings: { "studio/": {} } })
+    expect(await loadSubmissions(bucket)).toEqual([])
   })
 })

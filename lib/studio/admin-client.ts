@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useState } from "react"
 import type { User } from "firebase/auth"
 
-import { UNVERIFIED_CODE } from "@/lib/studio/admin"
 import { describeLoadError, parseJsonObject } from "@/lib/studio/errors"
 
-export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "unverified" } | { status: "error"; message: string }
+export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error"; message: string }
 
 // What the API answered, as parsed: `pick` and the checks below read each
 // field by type rather than trusting a declared shape.
@@ -19,12 +18,10 @@ type AdminPath = `/api/admin/${string}`
 // page) is logged with its status instead of vanishing into a parse error.
 export async function adminRequest<T>(user: Pick<User, "getIdToken">, path: AdminPath, pick: (body: Body) => T | undefined): Promise<Load<T>> {
   try {
-    // A fresh token, so a just-verified email counts right away.
-    const token = await user.getIdToken(true)
+    const token = await user.getIdToken()
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } })
     const raw = await response.text()
     const body = parseJsonObject(path, response.status, raw)
-    if (body?.code === UNVERIFIED_CODE) return { status: "unverified" }
     const data = response.ok && body ? pick(body) : undefined
     if (data !== undefined) return { status: "ready", data }
     if (response.ok) {
@@ -44,9 +41,8 @@ export async function adminRequest<T>(user: Pick<User, "getIdToken">, path: Admi
 }
 
 // How an admin page loads: one state machine, one error vocabulary, and a
-// `reload` that really re-requests. That matters after "I've verified it":
-// `user.reload()` changes the same User object in place, so no effect
-// dependency moves and only the attempt counter can trigger a new request.
+// `reload` that really re-requests (no effect dependency moves on Reload, so
+// only the attempt counter can trigger a new request).
 // `pick` must be stable (declare it at module level): it is an effect
 // dependency, and an inline arrow would re-request on every render, forever.
 export function useAdminLoad<T>(user: User, path: AdminPath, pick: (body: Body) => T | undefined): { load: Load<T>; reload: () => void } {

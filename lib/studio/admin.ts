@@ -1,20 +1,5 @@
 import type { RecordingChecks } from "@/lib/studio/checks"
 
-// The one account that can open /admin and see every Studio submission. The
-// same email is in docs/studio-capture/storage.rules (which compares it
-// exactly, so keep it lower-case), docs/studio-capture/rules-test.mjs and
-// the README: change all four together. admin-auth.test.ts imports it.
-export const STUDIO_ADMIN_EMAIL = "bkim@vflo.app"
-
-export function isStudioAdmin(email: string | null | undefined): boolean {
-  return (email ?? "").toLowerCase() === STUDIO_ADMIN_EMAIL
-}
-
-// The `code` /api/admin/* answers with when the admin's email isn't verified
-// yet; the pages show the "Send verification email" panel on it instead of
-// an error. One constant for both sides of the wire.
-export const UNVERIFIED_CODE = "unverified"
-
 export type SubmissionProblem = {
   kind: "no-recording" | "no-token" | "meta-unreadable" | "request-unreadable"
   detail?: string

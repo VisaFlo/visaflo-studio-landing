@@ -5,7 +5,7 @@ import { connectAuthEmulator, getAuth, type Auth } from "firebase/auth"
 import { connectFirestoreEmulator, getFirestore, type Firestore } from "firebase/firestore"
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from "firebase/storage"
 
-import { BUCKET, PROJECT_ID } from "@/lib/studio/project"
+import { BUCKET, FIRESTORE_DATABASE_ID, PROJECT_ID } from "@/lib/studio/project"
 
 // Studio signs people in against the VisaFlo production Firebase project, so a
 // VisaFlo account works here unchanged and a Studio account works in VisaFlo.
@@ -20,7 +20,6 @@ const config = {
   messagingSenderId: "1051689408312",
   appId: "1:1051689408312:web:e812d0a48a87ddd62593cd",
 }
-const FIRESTORE_DATABASE_ID = "ca-dryrun"
 
 // Local QA only: point everything at the Firebase emulators (see
 // docs/studio-capture/README.md). A demo- project id means a missed emulator

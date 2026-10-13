@@ -20,15 +20,12 @@ service firebase.storage {
 
     // VisaFlo Studio (studio.visaflo.ca): a signed-in person uploads the face
     // and voice recording for their sample video, plus a small request.json,
-    // into their own folder. Write-only for them; only the Studio admin
-    // account (studio.visaflo.ca/admin) can list, read and download every
-    // submission. Nobody writes anywhere else: samples are made by hand
-    // from the downloaded recording.
-    match /studio/{allPaths=**} {
-      allow read: if request.auth != null
-                  && request.auth.token.email == 'bkim@vflo.app'
-                  && request.auth.token.email_verified == true;
-    }
+    // into their own folder. Write-only for them; no browser token can list,
+    // read or delete anything under studio/. The admin pages
+    // (studio.visaflo.ca/admin) go through the server, which checks the
+    // caller's VisaFlo master flag and then uses its service account (that
+    // bypasses these rules). The admin player streams through download-token
+    // links, which these rules don't gate either.
     match /studio/{uid}/{submissionId}/{fileName} {
       allow create, update: if request.auth != null
                             && request.auth.uid == uid

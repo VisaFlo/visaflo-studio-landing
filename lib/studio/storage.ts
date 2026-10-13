@@ -1,6 +1,6 @@
-// Firebase Storage over REST with the caller's own ID token: the storage
-// rules decide what each token may read, so no service account is needed on
-// Vercel.
+// The studio/ objects as the admin routes see them. The server reads them
+// with the service account (lib/studio/admin-bucket.ts), never with a
+// person's token; the storage rules keep everyone else out.
 import { BUCKET, PROJECT_ID } from "@/lib/studio/project"
 
 // Local QA: the same Storage emulator the browser uploads to (see
@@ -22,7 +22,7 @@ export class StorageError extends Error {
     this.name = "StorageError"
   }
 
-  /** The token or the rules said no: about the caller, not about this one object. */
+  /** Storage refused the credentials: about the caller, not about this one object. */
   get refused(): boolean {
     return this.status === 401 || this.status === 403
   }
@@ -41,47 +41,25 @@ export type ObjectMeta = {
 
 const objects = () => `${storageBase()}/v0/b/${BUCKET}/o`
 
-export async function storageGet(token: string, path: string): Promise<Response> {
-  const response = await fetch(`${objects()}${path}`, {
-    headers: { Authorization: `Firebase ${token}` },
-    cache: "no-store",
-  })
-  if (!response.ok) throw new StorageError(response.status, await response.text())
-  return response
-}
-
-export async function storageJson<T>(token: string, objectName: string): Promise<T> {
-  return (await storageGet(token, `/${encodeURIComponent(objectName)}?alt=media`)).json() as Promise<T>
-}
-
-export async function storageMeta(token: string, objectName: string): Promise<ObjectMeta> {
-  return (await storageGet(token, `/${encodeURIComponent(objectName)}`)).json() as Promise<ObjectMeta>
-}
-
 export function firstDownloadToken(meta: ObjectMeta): string | undefined {
   return meta.downloadTokens?.split(",")[0] || undefined
 }
 
 export type Listing = { prefixes: string[]; items: string[] }
 
-// One folder level, the way the Firebase SDK lists: prefix plus "/" delimiter,
-// following the page token so a long folder isn't cut off at 1000 objects.
-export async function listObjects(token: string, prefix: string): Promise<Listing> {
-  const listing: Listing = { prefixes: [], items: [] }
-  let pageToken: string | undefined
-  do {
-    const query = new URLSearchParams({ prefix, delimiter: "/", maxResults: "1000" })
-    if (pageToken) query.set("pageToken", pageToken)
-    const body = (await (await storageGet(token, `?${query}`)).json()) as {
-      prefixes?: string[]
-      items?: { name: string }[]
-      nextPageToken?: string
-    }
-    listing.prefixes.push(...(body.prefixes ?? []))
-    listing.items.push(...(body.items ?? []).map((item) => item.name))
-    pageToken = body.nextPageToken
-  } while (pageToken)
-  return listing
+/**
+ * What the admin routes need from the bucket. Every method throws a
+ * StorageError carrying the HTTP status when Storage says no (404 for a
+ * missing object).
+ */
+export type StudioBucket = {
+  /** One folder level: the sub-folders and the objects directly under `prefix` (which ends in "/"). */
+  list: (prefix: string) => Promise<Listing>
+  meta: (objectName: string) => Promise<ObjectMeta>
+  /** The object parsed as JSON; a body that isn't JSON throws a SyntaxError. */
+  json: (objectName: string) => Promise<unknown>
+  read: (objectName: string) => Promise<{ body: ReadableStream<Uint8Array>; contentType?: string; length?: number }>
+  remove: (objectName: string) => Promise<void>
 }
 
 // A link that opens the file for anyone holding the token, no header needed:

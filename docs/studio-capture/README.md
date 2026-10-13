@@ -34,18 +34,23 @@ and request a sample video.
 
 - **Admin**: `/admin` lists every submission (when, who, topic, length,
   check flags), including people who recorded but never picked a topic,
-  with a **Download recording** button on each row that has a recording
-  (the download needs no download token, only the admin's token). A row opens its own
-  page (`/admin/{uid}/{submissionId}`) with the recording playable, the
-  consent text, and the same download. The file is saved as
-  `{name-or-email-or-uid}-{submissionId}.{ext}` (`GET /api/admin/recording`
-  streams it through the server, because the bucket serves it inline and a
-  cross-origin link can't force a download). Only `bkim@vflo.app` with a
-  verified email gets in (`lib/studio/admin.ts`, and the same email in
-  `storage.rules`). Both admin routes read the bucket through the Firebase
-  Storage API with that person's own ID token, so the storage rules decide
-  access and there is still no service account. An unverified admin email
-  gets a "Send verification email" button on the page. `request.json` is
+  with a **Download recording** button on each row that has a recording.
+  A row opens its own page (`/admin/{uid}/{submissionId}`) with the
+  recording playable, the consent text, the same download, and **Delete
+  submission** (after a confirm, `DELETE /api/admin/submissions` removes
+  every file in the folder for good and names any it couldn't). The file is
+  saved as `{name-or-email-or-uid}-{submissionId}.{ext}`
+  (`GET /api/admin/recording` streams it through the server, because the
+  bucket serves it inline and a cross-origin link can't force a download).
+  Anyone VisaFlo marked as a master gets in: `master: true` on their
+  `users/{uid}` doc in the `ca-dryrun` database, or the legacy `'master'`
+  role entry, the same rule as the backend's `isMaster`
+  (`lib/studio/admin-auth.ts`). The admin routes check that with the
+  server's service account (`FIREBASE_CLIENT_EMAIL` and
+  `FIREBASE_PRIVATE_KEY`, `lib/studio/admin-firebase.ts`) and then use the
+  same account for the bucket, which bypasses the storage rules; no browser
+  token can read `studio/`. Storage rules can't make that check themselves,
+  since they only see the `(default)` Firestore database. `request.json` is
   read field by field (`readRequestJson`), since the person's own browser
   wrote it. Sample videos are made by hand from the downloaded recording;
   the automatic pipeline that used to run from this page was removed in
@@ -54,17 +59,22 @@ and request a sample video.
 
 ## Before it works in production
 
-1. **Storage rules** (Firebase console or CLI, project owner): publish
+1. **Service account** (Vercel, Production and Preview):
+   `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`, the `client_email` and
+   `private_key` of a `devdashboard-c9159` service account key (the
+   `firebase-adminsdk` one has the Storage and Firestore access it needs).
+   Paste the key as it appears in the JSON file, `\n`s and all. Without them
+   `/admin` says which variable is missing.
+2. **Storage rules** (Firebase console or CLI, project owner): publish
    `storage.rules` from this folder to the `devdashboard-c9159-ca` bucket. It
-   is the live ruleset plus two `studio/` blocks (a person writes their own
-   recording and request.json; the admin reads everything); nothing else
-   changes. Publishing replaces the whole ruleset, so diff it against the
-   console's current rules first (the non-studio parts matched the console
-   on 2026-10-08; the studio blocks were last published 2026-10-10 with
-   admin write, which this version drops). Until then uploads fail with "We
-   couldn't save your recording" and `/admin` says "Storage refused the
-   read".
-2. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
+   is the live ruleset plus one `studio/` block (a person writes their own
+   recording and request.json); nothing else changes. Publishing replaces
+   the whole ruleset, so diff it against the console's current rules first
+   (the non-studio parts matched the console on 2026-10-08; the studio
+   blocks were last published 2026-10-10 with an admin read and write,
+   which this version drops). The admin pages work either way, since they
+   don't go through the rules.
+3. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
    email and password sign-in doesn't need an authorized domain.
 
 ## Local QA without touching production
@@ -81,13 +91,15 @@ firebase emulators:start --only auth,storage,firestore --project demo-studio
 # Terminal 2: the app, pointed at the emulators (dev builds only)
 NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
 
-# Storage rules matrix (20 cases, including the admin reads) against the running emulators
+# Storage rules matrix (21 cases) against the running emulators
 node docs/studio-capture/rules-test.mjs
 ```
 
 After `rules-test.mjs` has run, `/admin` can be opened against the emulators
-as `bkim@vflo.app` / `password123` (the script creates that account,
-verified).
+as `bkim@vflo.app` / `password123` (the script creates that account) once
+its `users/{uid}` doc in the emulator's `ca-dryrun` database has
+`master: true`; the dev server's admin routes use the emulators, not the
+service account.
 
 To walk the flow with a real VisaFlo account without writing to production,
 set only `NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1`: sign-in and

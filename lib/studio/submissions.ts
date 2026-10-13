@@ -2,7 +2,7 @@ import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
 import { isPlainObject } from "@/lib/studio/checks"
 import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
 import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
-import { consoleUrl, firstDownloadToken, listObjects, mediaUrl, storageJson, storageMeta, StorageError } from "@/lib/studio/storage"
+import { consoleUrl, firstDownloadToken, mediaUrl, StorageError, type StudioBucket } from "@/lib/studio/storage"
 
 export type SubmissionRef = { uid: string; submissionId: string }
 
@@ -40,7 +40,7 @@ export function downloadName(who: Pick<RequestJson, "name" | "email">, ref: Subm
   return `${person}-${ref.submissionId}.${ext}`
 }
 
-async function readSubmission(token: string, ref: SubmissionRef, items: string[]): Promise<Submission> {
+async function readSubmission(bucket: StudioBucket, ref: SubmissionRef, items: string[]): Promise<Submission> {
   const folder = submissionFolder(ref)
   const submission: Submission = {
     id: `${ref.uid}/${ref.submissionId}`,
@@ -53,7 +53,7 @@ async function readSubmission(token: string, ref: SubmissionRef, items: string[]
   const recording = recordingObject(items)
   const request = items.find((name) => name.endsWith("/request.json"))
 
-  // A refused read is about the token or the rules, not this file: let the
+  // A refused read is about the server's credentials, not this file: let the
   // route say so once instead of every row saying "read problem".
   const unreadable = (kind: SubmissionProblem["kind"], what: string) => (error: unknown) => {
     if (error instanceof StorageError && error.refused) throw error
@@ -70,8 +70,8 @@ async function readSubmission(token: string, ref: SubmissionRef, items: string[]
   }
 
   const [meta, details] = await Promise.all([
-    recording ? storageMeta(token, recording).catch(unreadable("meta-unreadable", "the recording's metadata")) : undefined,
-    request ? storageJson<unknown>(token, request).then(asObject).catch(unreadable("request-unreadable", "request.json")) : undefined,
+    recording ? bucket.meta(recording).catch(unreadable("meta-unreadable", "the recording's metadata")) : undefined,
+    request ? bucket.json(request).then(asObject).catch(unreadable("request-unreadable", "request.json")) : undefined,
   ])
 
   if (recording) submission.recording = { name: recording }
@@ -120,22 +120,22 @@ async function inBatches<T, R>(inputs: T[], size: number, work: (input: T) => Pr
 }
 
 // One submission for its own page; null when the folder has nothing in it.
-export async function loadSubmission(token: string, ref: SubmissionRef): Promise<Submission | null> {
-  const { items } = await listObjects(token, `${submissionFolder(ref)}/`)
+export async function loadSubmission(bucket: StudioBucket, ref: SubmissionRef): Promise<Submission | null> {
+  const { items } = await bucket.list(`${submissionFolder(ref)}/`)
   if (!items.length) return null
-  return readSubmission(token, ref, items)
+  return readSubmission(bucket, ref, items)
 }
 
 // Every studio/{uid}/{submissionId}/ folder, newest first.
-export async function loadSubmissions(token: string): Promise<Submission[]> {
-  const people = await listObjects(token, "studio/")
-  const folders = (await inBatches(people.prefixes, 10, (prefix) => listObjects(token, prefix))).flatMap((l) => l.prefixes)
+export async function loadSubmissions(bucket: StudioBucket): Promise<Submission[]> {
+  const people = await bucket.list("studio/")
+  const folders = (await inBatches(people.prefixes, 10, (prefix) => bucket.list(prefix))).flatMap((l) => l.prefixes)
   const refs = folders.flatMap((prefix) => {
     const ref = parseSubmissionId(prefix.replace(/^studio\//, "").replace(/\/$/, ""))
     if (!ref) console.error(`Skipping a folder that isn't studio/{uid}/{submissionId}/: ${prefix}`)
     return ref ? [ref] : []
   })
-  const submissions = await inBatches(refs, 10, async (ref) => readSubmission(token, ref, (await listObjects(token, `${submissionFolder(ref)}/`)).items))
+  const submissions = await inBatches(refs, 10, async (ref) => readSubmission(bucket, ref, (await bucket.list(`${submissionFolder(ref)}/`)).items))
   const at = (s: Submission) => s.requestedAt ?? s.recordedAt ?? ""
   return submissions.sort((a, b) => at(b).localeCompare(at(a)))
 }

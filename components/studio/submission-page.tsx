@@ -4,7 +4,8 @@ import { useState } from "react"
 import Link from "next/link"
 import type { User } from "firebase/auth"
 
-import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
+import { AdminShell, Tag } from "@/components/studio/admin-shell"
+import { DeleteSubmission } from "@/components/studio/delete-submission"
 import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
@@ -15,8 +16,9 @@ import { checkFlags } from "@/lib/studio/checks"
 const pickSubmission = (body: Record<string, unknown>) =>
   body.submission && typeof body.submission === "object" ? (body.submission as Submission) : undefined
 
-// One submission: who they are, the recording, and a button to save the
-// original file. Sample videos are made by hand from that download.
+// One submission: who they are, the recording, a button to save the original
+// file and one to delete the submission. Sample videos are made by hand from
+// that download.
 export function SubmissionPage({ id }: { id: string }) {
   return (
     <AdminShell path={`/admin/${id}`} wide>
@@ -26,7 +28,7 @@ export function SubmissionPage({ id }: { id: string }) {
 }
 
 function SubmissionBody({ user, id }: { user: User; id: string }) {
-  const { load, reload } = useAdminLoad(user, `/api/admin/submissions?id=${encodeURIComponent(id)}`, pickSubmission)
+  const { load } = useAdminLoad(user, `/api/admin/submissions?id=${encodeURIComponent(id)}`, pickSubmission)
   // The URL the player last failed on; a reload with a new URL tries again.
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
@@ -41,14 +43,6 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
       <>
         {back}
         <p className="m-0 text-[14px] text-stone-500">Loading…</p>
-      </>
-    )
-  }
-  if (load.status === "unverified") {
-    return (
-      <>
-        {back}
-        <VerifyEmail user={user} onVerified={reload} />
       </>
     )
   }
@@ -149,6 +143,9 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
                 Email them
               </a>
             )}
+          </div>
+          <div className="border-t border-stone-200 pt-4">
+            <DeleteSubmission user={user} id={s.id} who={title} />
           </div>
         </div>
       </section>

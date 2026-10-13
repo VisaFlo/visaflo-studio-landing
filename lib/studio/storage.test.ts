@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 
-import { firstDownloadToken, listObjects, mediaUrl, storageBase, StorageError } from "@/lib/studio/storage"
-import { fakeBucket } from "@/lib/studio/test-bucket"
+import { firstDownloadToken, mediaUrl, storageBase, StorageError } from "@/lib/studio/storage"
 
 describe("mediaUrl", () => {
   it("encodes the object name and carries the token", () => {
@@ -20,39 +19,11 @@ describe("firstDownloadToken", () => {
 })
 
 describe("StorageError", () => {
-  it("knows a refused read (token or rules) from any other failure", () => {
+  it("knows refused credentials from any other failure, and keeps its message short", () => {
     expect(new StorageError(401, "x").refused).toBe(true)
     expect(new StorageError(403, "x").refused).toBe(true)
     expect(new StorageError(404, "x").refused).toBe(false)
     expect(new StorageError(500, "x").refused).toBe(false)
-  })
-})
-
-describe("listObjects", () => {
-  afterEach(() => vi.unstubAllGlobals())
-
-  it("reads with the caller's token as a Firebase header and never from a cache", async () => {
-    const fetch = fakeBucket({ listings: { "studio/": {} } })
-    await listObjects("the-token", "studio/")
-    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Firebase the-token" }, cache: "no-store" })
-  })
-
-  it("follows nextPageToken so a long folder isn't cut off at one page", async () => {
-    const fetch = fakeBucket({
-      listings: {
-        "studio/": { prefixes: ["studio/u1/"], nextPageToken: "p2" },
-        "studio/#p2": { prefixes: ["studio/u2/"], items: ["studio/x.json"] },
-      },
-    })
-    expect(await listObjects("t", "studio/")).toEqual({ prefixes: ["studio/u1/", "studio/u2/"], items: ["studio/x.json"] })
-    const second = new URL(String(fetch.mock.calls[1][0]))
-    expect(second.searchParams.get("pageToken")).toBe("p2")
-    expect(second.searchParams.get("delimiter")).toBe("/")
-  })
-
-  it("throws a StorageError that keeps the status", async () => {
-    fakeBucket({ listings: { "studio/": 403 } })
-    await expect(listObjects("t", "studio/")).rejects.toMatchObject({ name: "StorageError", status: 403 })
     expect(new StorageError(500, "x".repeat(400)).message.length).toBeLessThan(330)
   })
 })

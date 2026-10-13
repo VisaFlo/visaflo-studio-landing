@@ -3,7 +3,7 @@
 import Link from "next/link"
 import type { User } from "firebase/auth"
 
-import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
+import { AdminShell, Tag } from "@/components/studio/admin-shell"
 import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
@@ -34,7 +34,6 @@ function AdminList({ user }: { user: User }) {
         </SecondaryButton>
       </div>
 
-      {load.status === "unverified" && <VerifyEmail user={user} onVerified={reload} />}
       {load.status === "error" && <ErrorText>{load.message}</ErrorText>}
       {load.status === "ready" && <SubmissionTable user={user} submissions={load.data} />}
     </>
