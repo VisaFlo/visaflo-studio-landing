@@ -1,4 +1,5 @@
 import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
+import { isPlainObject } from "@/lib/studio/checks"
 import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
 import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
 import { consoleUrl, firstDownloadToken, listObjects, mediaUrl, storageJson, storageMeta, StorageError } from "@/lib/studio/storage"
@@ -64,7 +65,7 @@ async function readSubmission(token: string, ref: SubmissionRef, items: string[]
   // readRequestJson turns anything that isn't an object into {}, which would
   // read here as "no topic"; name the real shape instead.
   const asObject = (raw: unknown): RequestJson => {
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) return readRequestJson(raw)
+    if (isPlainObject(raw)) return readRequestJson(raw)
     throw new Error(`request.json is ${Array.isArray(raw) ? "an array" : raw === null ? "null" : `a ${typeof raw}`}, not an object`)
   }
 

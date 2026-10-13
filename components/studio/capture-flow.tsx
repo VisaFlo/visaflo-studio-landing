@@ -22,7 +22,7 @@ import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
 import { faceVerdict, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
-import { ApiError, describeSubmitError } from "@/lib/studio/errors"
+import { ApiError, describeSubmitError, uploadFailureReason, type UploadFailure } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording } from "@/lib/studio/recorder"
@@ -50,16 +50,9 @@ type Step =
   | "topic"
   | "done"
 
-type UploadState = {
-  status: "idle" | "uploading" | "done" | "failed"
-  progress: number
-  /** Why it failed: a dropped connection, the server refusing the file, or something else (`code` says what). */
-  reason?: "network" | "refused" | "other"
-  code?: string
-}
-
-/** How long Finish waits for the recorder's final data before giving the take up as stuck. */
-const STOP_TIMEOUT_MS = 5000
+// The recording upload, for the banner. A failure keeps how far it got and
+// says why (see uploadFailureReason).
+type UploadState = { status: "idle" } | { status: "uploading"; progress: number } | { status: "done" } | ({ status: "failed"; progress: number } & UploadFailure)
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
@@ -97,7 +90,7 @@ export function CaptureFlow() {
 
   const submissionId = useRef<string | null>(null)
   const upload = useRef<UploadHandle | null>(null)
-  const [uploadState, setUploadState] = useState<UploadState>({ status: "idle", progress: 0 })
+  const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" })
   const [topicId, setTopicId] = useState<string | null>(null)
   const [ownTopic, setOwnTopic] = useState("")
   const [sending, setSending] = useState(false)
@@ -186,17 +179,20 @@ export function CaptureFlow() {
     typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(pickRecordingMime())
 
   // The camera or the recorder gave out (unplugged, taken by another app, a
-  // tab the phone put to sleep): stop pretending to record and say so.
+  // tab the phone put to sleep): stop pretending to record and say so. The
+  // saved take goes too, or a later visit would offer it back as "the page
+  // closed while you were recording", which isn't what happened.
   const abandonCamera = useCallback(
     (reason: string) => {
       take.current += 1
       recorder.current?.cancel()
       recorder.current = null
       stopCamera()
+      if (user) void clearTake(user.uid)
       setCameraError(reason)
       setStep("camera")
     },
-    [stopCamera],
+    [stopCamera, user],
   )
 
   async function openCamera() {
@@ -261,7 +257,11 @@ export function CaptureFlow() {
       onChunk: (chunk, index) => void saveChunk(takeId, index, chunk),
       onEnded: (reason) => {
         console.error(`Recording ended on its own (${reason})`)
-        abandonCamera("Recording stopped: your camera or microphone was lost. Try again, or open this page on your phone.")
+        abandonCamera(
+          reason === "error"
+            ? "Recording failed in this browser. Try again, or open this page in Chrome or Safari, or on your phone."
+            : "Recording stopped: your camera or microphone was lost. Try again, or open this page on your phone.",
+        )
       },
     })
   }
@@ -278,8 +278,8 @@ export function CaptureFlow() {
       recorder.current = recordTake(stream)
     } catch (error) {
       // MediaRecorder refused the stream (this browser can't record a canvas
-      // stream with the chosen type, or a track ended). Say so instead of
-      // leaving the countdown stuck on 1.
+      // stream with the chosen type, or a track ended), or recordTake's own
+      // guard refused. Say so instead of leaving the countdown stuck on 1.
       console.error("MediaRecorder failed to start", error)
       recorder.current = null
       stopCamera()
@@ -302,20 +302,12 @@ export function CaptureFlow() {
     recorder.current = null
     if (!active) return
     const finishing = take.current
-    // A recorder whose stop event never comes (a browser bug) would leave
-    // Finish dead; give it a few seconds, then treat the take as lost.
-    const result = await Promise.race([
-      active.stop(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), STOP_TIMEOUT_MS)),
-    ])
+    // stop() waits for the recorder's final data, or gives up after a few
+    // seconds with what there is (then `cutOff`), and cleans up either way.
+    const result = await active.stop()
     // Start over was pressed (or the camera gave out) while this clip was
     // finishing: that decision wins.
     if (take.current !== finishing) return
-    if (!result) {
-      console.error("The recorder didn't finish in time")
-      abandonCamera("Recording didn't finish. Try again, or open this page in Chrome or Safari, or on your phone.")
-      return
-    }
     if (result.blob.size === 0) {
       // A recorder that produced nothing must not reach the review as a
       // black clip that can be submitted.
@@ -351,20 +343,11 @@ export function CaptureFlow() {
     )
     upload.current = handle
     handle.done
-      .then(() => setUploadState({ status: "done", progress: 1 }))
+      .then(() => setUploadState({ status: "done" }))
       .catch((error: unknown) => {
-        const code = (error as { code?: string })?.code ?? ""
-        if (code === "storage/canceled") return
+        if ((error as { code?: string })?.code === "storage/canceled") return
         console.error("Upload failed", error)
-        // Only a retry-fixable failure is called a connection problem; the
-        // rules refusing the file is a sign-in matter; anything else is named.
-        const reason =
-          code === "storage/unauthorized" || code === "storage/unauthenticated"
-            ? "refused"
-            : code === "storage/retry-limit-exceeded" || code === "storage/unknown" || !code
-              ? "network"
-              : "other"
-        setUploadState((s) => ({ status: "failed", progress: s.progress, reason, code }))
+        setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...uploadFailureReason(error) }))
       })
   }
 
@@ -445,7 +428,7 @@ export function CaptureFlow() {
     setConsent(false)
     setTopicId(null)
     setOwnTopic("")
-    setUploadState({ status: "idle", progress: 0 })
+    setUploadState({ status: "idle" })
     upload.current = null
     submissionId.current = null
     setStep("setup")
@@ -581,6 +564,11 @@ export function CaptureFlow() {
             onConsent={setConsent}
             error={reviewError}
             notice={reviewNotice}
+            onPlayable={(playable) =>
+              // Whether this browser could play its own take back travels with
+              // the checks, so the team hears about a damaged file.
+              setRecording((r) => (r ? { ...r, checks: { ...(r.checks ?? { faceSeen: null, voiceHeard: null }), playable } } : r))
+            }
             onSubmit={submitRecording}
             onRedo={() => setStep("camera")}
           />

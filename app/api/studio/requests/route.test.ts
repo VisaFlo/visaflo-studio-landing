@@ -24,8 +24,9 @@ const BODY = {
   consent: "I agree",
   consentAt: "2026-10-09T21:19:00.000Z",
 }
-const post = (body: unknown) =>
-  POST(new Request("http://x/api/studio/requests", { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body: JSON.stringify(body) }))
+const postRaw = (body: string) =>
+  POST(new Request("http://x/api/studio/requests", { method: "POST", headers: { authorization: "Bearer t", "content-type": "application/json" }, body }))
+const post = (body: unknown) => postRaw(JSON.stringify(body))
 
 describe("POST /api/studio/requests", () => {
   beforeEach(() => {
@@ -54,11 +55,22 @@ describe("POST /api/studio/requests", () => {
     expect((await post({ ...BODY, recordingPath: "studio/u2/20261009T211755-393dbaa7/recording.mp4" })).status).toBe(400)
     expect((await post({ ...BODY, recordingPath: "studio/u1/20261009T211755-393dbaa7/recording.txt" })).status).toBe(400)
     expect((await post({ ...BODY, submissionId: "../x" })).status).toBe(400)
-    // An over-long id is refused, not truncated into some other id.
-    const long = "a".repeat(70)
-    expect((await post({ ...BODY, submissionId: long, recordingPath: `studio/u1/${long}/recording.mp4` })).status).toBe(400)
     expect(mail).not.toHaveBeenCalled()
     // A client bug or someone probing: worth a line with the uid.
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("u1"), expect.anything())
+  })
+
+  it("refuses an over-long id even when truncating it would name a folder the caller owns", async () => {
+    const sent = "a".repeat(70)
+    expect((await post({ ...BODY, submissionId: sent, recordingPath: `studio/u1/${sent.slice(0, 64)}/recording.mp4` })).status).toBe(400)
+    expect(mail).not.toHaveBeenCalled()
+  })
+
+  it("logs the other refusals too: a body that isn't JSON, no topic, a bad consent time", async () => {
+    expect((await postRaw("not json")).status).toBe(400)
+    expect((await post({ ...BODY, topicTitle: "" })).status).toBe(400)
+    expect((await post({ ...BODY, consentAt: "yesterday" })).status).toBe(400)
+    expect(console.error).toHaveBeenCalledTimes(3)
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("u1"), expect.anything())
   })
 
@@ -77,8 +89,10 @@ describe("POST /api/studio/requests", () => {
     )
   })
 
-  it("never lets a nonsense length reach the email", async () => {
-    await post({ ...BODY, recordingSeconds: 1e999 })
+  it("never lets an infinite length reach the email (1e999 parses as Infinity)", async () => {
+    // Raw text: JSON.stringify would have turned 1e999 into null.
+    const body = JSON.stringify(BODY).replace("61.4", "1e999")
+    expect((await postRaw(body)).status).toBe(200)
     expect(mail.mock.calls[0][0].recordingSeconds).toBe(0)
   })
 

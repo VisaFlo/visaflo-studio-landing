@@ -38,6 +38,7 @@ describe("adminRequest", () => {
   it("surfaces the server's own error, else the status, and logs a body that isn't JSON", async () => {
     reply(JSON.stringify({ error: "Storage refused the read." }), 502)
     expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({ status: "error", message: "Storage refused the read." })
+    expect(console.error).not.toHaveBeenCalled()
 
     reply("<html>Gateway timeout</html>", 504, "text/html")
     expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
@@ -45,6 +46,21 @@ describe("adminRequest", () => {
       message: "Request failed (504). Reload to try again.",
     })
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("/api/admin/submissions"), 504, expect.stringContaining("Gateway timeout"))
+  })
+
+  it("logs a failure whose error isn't a string, and doesn't crash on a null body", async () => {
+    reply(JSON.stringify({ error: { code: "FUNCTION_INVOCATION_TIMEOUT" } }), 504)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "Request failed (504). Reload to try again.",
+    })
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("without a usable error message"), 504, expect.stringContaining("FUNCTION_INVOCATION_TIMEOUT"))
+
+    reply("null", 500)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "Request failed (500). Reload to try again.",
+    })
   })
 
   it("treats a 200 with the wrong shape as an error, and logs the body so it can be looked at", async () => {

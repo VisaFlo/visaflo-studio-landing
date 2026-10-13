@@ -5,8 +5,8 @@ import type { FaceLandmarker } from "@mediapipe/tasks-vision"
 import { portraitCrop } from "@/lib/studio/portrait"
 
 // MediaPipe Face Landmarker, loaded on demand so the landing page never pays
-// for it. The WASM runtime is pinned to 1.1.0; bump WASM_BASE and the
-// @mediapipe/tasks-vision version in package.json together.
+// for it. The WASM runtime is pinned to 1.1.0, which the lockfile resolves
+// @mediapipe/tasks-vision to; bump WASM_BASE and the package together.
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm"
 const MODEL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"

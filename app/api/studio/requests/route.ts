@@ -39,10 +39,18 @@ export async function POST(request: Request) {
     console.error(`Rejected a recording path from ${user.uid}`, { submissionId: body.submissionId, recordingPath: body.recordingPath })
     return Response.json({ error: "That recording doesn't belong to this account." }, { status: 400 })
   }
+  // The client sends these only once they are set, so a refusal here is a
+  // client bug worth a line too.
   const topicTitle = text(body.topicTitle, LIMITS.topicTitle)
-  if (!topicTitle) return Response.json({ error: "Pick a topic first." }, { status: 400 })
+  if (!topicTitle) {
+    console.error(`Rejected a request from ${user.uid}: no topic`, { topicTitle: body.topicTitle })
+    return Response.json({ error: "Pick a topic first." }, { status: 400 })
+  }
   const consentAt = isoDate(body.consentAt)
-  if (!consentAt) return Response.json({ error: "Agree to the consent first." }, { status: 400 })
+  if (!consentAt) {
+    console.error(`Rejected a request from ${user.uid}: bad consent time`, { consentAt: body.consentAt })
+    return Response.json({ error: "Agree to the consent first." }, { status: 400 })
+  }
 
   try {
     await sendStudioRequestEmail({

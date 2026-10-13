@@ -16,12 +16,25 @@ describe("parseChecks", () => {
   })
 })
 
+describe("parseChecks: the review's playback result", () => {
+  it("is carried only when the browser sent it", () => {
+    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: false })).toEqual({ faceSeen: true, voiceHeard: true, playable: false })
+    expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: "x" })).toEqual({ faceSeen: true, voiceHeard: true, playable: null })
+    expect(parseChecks({ faceSeen: true, voiceHeard: true })).toEqual({ faceSeen: true, voiceHeard: true })
+  })
+})
+
 describe("checkFlags", () => {
   it("names what failed and what never ran, and nothing when all is well", () => {
     expect(checkFlags({ faceSeen: true, voiceHeard: true })).toEqual([])
     expect(checkFlags({ faceSeen: false, voiceHeard: true })).toEqual(["No face seen"])
     expect(checkFlags({ faceSeen: null, voiceHeard: false })).toEqual(["Face check didn't run", "No voice heard"])
     expect(checkFlags({ faceSeen: true, voiceHeard: null })).toEqual(["Voice check didn't run"])
+  })
+  it("flags a take the review player couldn't play, and nothing when it could or wasn't tried", () => {
+    expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: false })).toEqual(["Review couldn't play it"])
+    expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: true })).toEqual([])
+    expect(checkFlags({ faceSeen: true, voiceHeard: true, playable: null })).toEqual([])
   })
   it("says so when a finished request carries no checks at all, so it can't pass for a clean take", () => {
     expect(checkFlags(undefined)).toEqual(["Checks not recorded"])
@@ -33,6 +46,8 @@ describe("describeChecks", () => {
     expect(describeChecks({ faceSeen: true, voiceHeard: null })).toBe("face seen, voice not checked")
     expect(describeChecks({ faceSeen: false, voiceHeard: false })).toBe("NO FACE SEEN, NO VOICE HEARD")
     expect(describeChecks({ faceSeen: null, voiceHeard: true })).toBe("face not checked, voice heard")
+    expect(describeChecks({ faceSeen: true, voiceHeard: true, playable: false })).toBe("face seen, voice heard, REVIEW COULDN'T PLAY IT")
+    expect(describeChecks({ faceSeen: true, voiceHeard: true, playable: true })).toBe("face seen, voice heard")
   })
 })
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { ApiError, apiError, describeLoadError, describeSubmitError } from "@/lib/studio/errors"
+import { ApiError, apiError, describeLoadError, describeSubmitError, parseJsonObject, uploadFailureReason } from "@/lib/studio/errors"
 
 const firebaseError = (code: string) => Object.assign(new Error(`Firebase: Error (${code}).`), { code })
 
@@ -13,6 +13,31 @@ describe("ApiError", () => {
   })
 })
 
+describe("parseJsonObject", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("returns an object body as is", () => {
+    expect(parseJsonObject("/api/x", 200, JSON.stringify({ a: 1 }))).toEqual({ a: 1 })
+    expect(console.error).not.toHaveBeenCalled()
+  })
+  it("logs and returns null for JSON that isn't an object", () => {
+    expect(parseJsonObject("/api/x", 500, "null")).toBeNull()
+    expect(parseJsonObject("/api/x", 500, "[1]")).toBeNull()
+    expect(parseJsonObject("/api/x", 500, '"text"')).toBeNull()
+    expect(console.error).toHaveBeenCalledTimes(3)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("isn't an object"), 500, "null")
+  })
+  it("logs and returns null for a body that isn't JSON (a gateway page)", () => {
+    expect(parseJsonObject("/api/x", 504, "<html>Gateway timeout</html>")).toBeNull()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("something other than JSON"), 504, expect.stringContaining("Gateway timeout"))
+  })
+})
+
 describe("apiError", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -22,16 +47,25 @@ describe("apiError", () => {
   })
 
   it("uses the route's own message when it wrote one", () => {
-    expect(apiError("/api/x", 400, JSON.stringify({ error: "Pick a topic first." })).message).toBe("Pick a topic first.")
+    expect(apiError("/api/x", 400, JSON.stringify({ error: " Pick a topic first. " })).message).toBe("Pick a topic first.")
     expect(console.error).not.toHaveBeenCalled()
   })
-  it("never shows an error that isn't a string, and names the status instead", () => {
+  it("never shows an error that isn't a non-empty string, names the status instead, and logs the body", () => {
     expect(apiError("/api/x", 500, JSON.stringify({ error: { code: "x", message: "y" } })).message).toBe("Request failed (500). Try again.")
+    expect(apiError("/api/x", 500, JSON.stringify({ error: "   " })).message).toBe("Request failed (500). Try again.")
+    expect(apiError("/api/x", 500, JSON.stringify({ message: "y" })).message).toBe("Request failed (500). Try again.")
+    expect(console.error).toHaveBeenCalledTimes(3)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("without a usable error message"), 500, expect.stringContaining("code"))
   })
   it("logs a body that isn't JSON (a gateway page) with its status", () => {
     const error = apiError("/api/x", 504, "<html>Gateway timeout</html>")
     expect(error.message).toBe("Request failed (504). Try again.")
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("/api/x"), 504, expect.stringContaining("Gateway timeout"))
+  })
+  it("is an ApiError on every branch, since callers show its message only when it is one", () => {
+    expect(apiError("/api/x", 400, JSON.stringify({ error: "Pick a topic first." }))).toBeInstanceOf(ApiError)
+    expect(apiError("/api/x", 500, JSON.stringify({ error: { code: "x" } }))).toBeInstanceOf(ApiError)
+    expect(apiError("/api/x", 504, "<html>Gateway timeout</html>")).toBeInstanceOf(ApiError)
   })
 })
 
@@ -75,5 +109,21 @@ describe("describeSubmitError", () => {
       "We couldn't send your request. Try again.",
     )
     expect(describeSubmitError(undefined)).toBe("We couldn't send your request. Try again.")
+  })
+})
+
+describe("uploadFailureReason", () => {
+  it("calls only a retry-limit failure a connection problem", () => {
+    expect(uploadFailureReason(firebaseError("storage/retry-limit-exceeded"))).toEqual({ reason: "network" })
+  })
+  it("sends the person back to sign-in when the rules refused the file", () => {
+    expect(uploadFailureReason(firebaseError("storage/unauthorized"))).toEqual({ reason: "refused" })
+    expect(uploadFailureReason(firebaseError("storage/unauthenticated"))).toEqual({ reason: "refused" })
+  })
+  it("names anything else rather than blaming the connection, including an error with no code", () => {
+    expect(uploadFailureReason(firebaseError("storage/quota-exceeded"))).toEqual({ reason: "other", code: "storage/quota-exceeded" })
+    expect(uploadFailureReason(firebaseError("storage/unknown"))).toEqual({ reason: "other", code: "storage/unknown" })
+    expect(uploadFailureReason(new RangeError("odd"))).toEqual({ reason: "other", code: "RangeError" })
+    expect(uploadFailureReason(undefined)).toEqual({ reason: "other", code: "no code" })
   })
 })

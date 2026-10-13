@@ -1,8 +1,8 @@
 // The one Firebase project everything here talks to: sign-in, token
 // verification, the recordings bucket and the console links. Both names are
 // also hard-coded in docs/studio-capture/README.md, and the bucket in
-// docs/studio-capture/rules-test.mjs and lib/studio/storage.test.ts; change
-// them together.
+// docs/studio-capture/rules-test.mjs, lib/studio/storage.test.ts and
+// lib/studio-request-mail.test.ts; change them together.
 export const PROJECT_ID = "devdashboard-c9159"
 /** Canada-region bucket, the one VisaFlo moved to in 2026-09. */
 export const BUCKET = "devdashboard-c9159-ca"

@@ -4,16 +4,31 @@
 // shared by the recorder, the take store, request.json, the email and /admin.
 export type Check = boolean | null
 
-export type RecordingChecks = { faceSeen: Check; voiceHeard: Check }
+export type RecordingChecks = {
+  faceSeen: Check
+  voiceHeard: Check
+  /**
+   * Whether the review page's player could play the take: false means the
+   * file is probably damaged. Absent when the person never pressed play
+   * (older request.json files have no such field either).
+   */
+  playable?: Check
+}
 
 const check = (value: unknown): Check => (value === true ? true : value === false ? false : null)
+
+// A JSON object, as opposed to null, an array or a bare value.
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
 
 // request.json and the request body come from the person's browser, so each
 // value is read, never trusted as typed.
 export function parseChecks(raw: unknown): RecordingChecks | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
-  const v = raw as Record<string, unknown>
-  return { faceSeen: check(v.faceSeen), voiceHeard: check(v.voiceHeard) }
+  if (!isPlainObject(raw)) return undefined
+  const checks: RecordingChecks = { faceSeen: check(raw.faceSeen), voiceHeard: check(raw.voiceHeard) }
+  if ("playable" in raw) checks.playable = check(raw.playable)
+  return checks
 }
 
 // Readings the tracker makes while recording before its tally outweighs what
@@ -38,6 +53,7 @@ export function checkFlags(checks: RecordingChecks | undefined): string[] {
   if (checks.faceSeen === null) flags.push("Face check didn't run")
   if (checks.voiceHeard === false) flags.push("No voice heard")
   if (checks.voiceHeard === null) flags.push("Voice check didn't run")
+  if (checks.playable === false) flags.push("Review couldn't play it")
   return flags
 }
 
@@ -45,5 +61,5 @@ export function checkFlags(checks: RecordingChecks | undefined): string[] {
 export function describeChecks(checks: RecordingChecks): string {
   const face = checks.faceSeen === true ? "face seen" : checks.faceSeen === false ? "NO FACE SEEN" : "face not checked"
   const voice = checks.voiceHeard === true ? "voice heard" : checks.voiceHeard === false ? "NO VOICE HEARD" : "voice not checked"
-  return `${face}, ${voice}`
+  return [face, voice, ...(checks.playable === false ? ["REVIEW COULDN'T PLAY IT"] : [])].join(", ")
 }

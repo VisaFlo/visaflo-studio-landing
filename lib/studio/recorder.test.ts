@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { startRecording, type ActiveRecorder } from "@/lib/studio/recorder"
+import { startRecording, STOP_TIMEOUT_MS, type ActiveRecorder } from "@/lib/studio/recorder"
 
 // Just enough MediaRecorder to drive startRecording: data and stop events are
 // fired by the test, the way the browser would.
@@ -35,18 +35,42 @@ class FakeRecorder {
   }
 }
 
+// A recorder whose stop event never comes (a browser bug).
+class StuckRecorder extends FakeRecorder {
+  stop() {
+    this.state = "inactive"
+  }
+}
+
+// A browser that can't record this stream at all.
+class RefusingRecorder extends FakeRecorder {
+  start() {
+    throw new DOMException("can't record this stream", "NotSupportedError")
+  }
+}
+
 // An AudioContext whose analyser always reads the same signal level. Tests
 // flip `state` on the instances to play an autoplay block or a phone call.
 const fakeAudio = (rms: number, state: "running" | "suspended" = "running") =>
   class FakeAudio {
     static instances: FakeAudio[] = []
+    static reads = 0
+    static closes = 0
     state: "running" | "suspended" = state
     constructor() {
       FakeAudio.instances.push(this)
     }
     resume = async () => {}
-    close = async () => {}
-    createAnalyser = () => ({ fftSize: 1024, getFloatTimeDomainData: (samples: Float32Array) => samples.fill(rms) })
+    close = async () => {
+      FakeAudio.closes += 1
+    }
+    createAnalyser = () => ({
+      fftSize: 1024,
+      getFloatTimeDomainData: (samples: Float32Array) => {
+        FakeAudio.reads += 1
+        samples.fill(rms)
+      },
+    })
     createMediaStreamSource = () => ({ connect() {} })
   }
 
@@ -56,20 +80,22 @@ const noAudio = class {
   }
 }
 
-function setup(
-  Audio: unknown,
-  onEnded?: (reason: "error" | "ended") => void,
-  onChunk?: (chunk: Blob, index: number) => void,
-): { active: ActiveRecorder; recorder: FakeRecorder } {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "performance"] })
-  vi.stubGlobal("window", globalThis)
-  vi.stubGlobal("MediaRecorder", FakeRecorder)
+type Options = { onEnded?: (reason: "error" | "ended") => void; onChunk?: (chunk: Blob, index: number) => void; Recorder?: typeof FakeRecorder }
+
+function setup(Audio: unknown, { onEnded, onChunk, Recorder = FakeRecorder }: Options = {}): { active: ActiveRecorder; recorder: FakeRecorder } {
+  vi.stubGlobal("MediaRecorder", Recorder)
   vi.stubGlobal("AudioContext", Audio)
-  vi.spyOn(console, "warn").mockImplementation(() => {})
-  vi.spyOn(console, "error").mockImplementation(() => {})
   const active = startRecording({} as MediaStream, { onChunk, onEnded })
   return { active, recorder: FakeRecorder.instances[FakeRecorder.instances.length - 1] }
 }
+
+beforeEach(() => {
+  // One clock per test: a second useFakeTimers would drop pending timers.
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "performance"] })
+  vi.stubGlobal("window", globalThis)
+  vi.spyOn(console, "warn").mockImplementation(() => {})
+  vi.spyOn(console, "error").mockImplementation(() => {})
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -147,6 +173,14 @@ describe("startRecording's length and lifetime", () => {
     expect(recorder.timeslice).toBe(1000)
   })
 
+  it("rethrows a start() the browser refuses, leaving no mic sampler or AudioContext behind", () => {
+    const Audio = fakeAudio(0)
+    expect(() => setup(Audio, { Recorder: RefusingRecorder })).toThrow("can't record this stream")
+    expect(Audio.closes).toBe(1)
+    vi.advanceTimersByTime(1000)
+    expect(Audio.reads).toBe(0)
+  })
+
   it("measures the take by the data it got, not by the clock", async () => {
     const { active, recorder } = setup(fakeAudio(0))
     vi.advanceTimersByTime(1000)
@@ -158,11 +192,12 @@ describe("startRecording's length and lifetime", () => {
     const take = await active.stop()
     expect(take.seconds).toBe(2)
     expect(take.blob.size).toBe(2)
+    expect(take.cutOff).toBe(false)
   })
 
   it("tells the caller when the recorder stops on its own, and only then", async () => {
     const onEnded = vi.fn()
-    const { active, recorder } = setup(fakeAudio(0), onEnded)
+    const { active, recorder } = setup(fakeAudio(0), { onEnded })
     recorder.chunk()
     recorder.die(new DOMException("track ended", "InvalidStateError"))
     expect(onEnded).toHaveBeenCalledWith("error")
@@ -171,34 +206,58 @@ describe("startRecording's length and lifetime", () => {
     expect((await active.stop()).blob.size).toBe(1)
 
     const quiet = vi.fn()
-    const second = setup(fakeAudio(0), quiet)
+    const second = setup(fakeAudio(0), { onEnded: quiet })
     await second.active.stop()
     expect(quiet).not.toHaveBeenCalled()
   })
 
   it("reports a stop without an error as ended", () => {
     const onEnded = vi.fn()
-    const { recorder } = setup(fakeAudio(0), onEnded)
+    const { recorder } = setup(fakeAudio(0), { onEnded })
     recorder.stop()
     expect(onEnded).toHaveBeenCalledWith("ended")
   })
 
   it("marks a take whose recorder failed as cut off, so the review can say so", async () => {
-    const onEnded = vi.fn()
-    const { active, recorder } = setup(fakeAudio(0), onEnded)
+    const { active, recorder } = setup(fakeAudio(0), { onEnded: vi.fn() })
     recorder.chunk()
     recorder.die(new Error("encoder"))
     expect((await active.stop()).cutOff).toBe(true)
-
-    const clean = setup(fakeAudio(0))
-    clean.recorder.chunk()
-    expect((await clean.active.stop()).cutOff).toBe(false)
   })
 
-  it("stays quiet when a discarded recorder stops (Start over is not a dead camera), and drops late data", () => {
+  it("waits for the final data when Finish lands as the recorder is already winding down", async () => {
+    const { active, recorder } = setup(fakeAudio(0))
+    recorder.chunk()
+    // The browser flips to inactive first; the last chunk and the stop event
+    // are still on their way.
+    recorder.state = "inactive"
+    const pending = active.stop()
+    recorder.chunk()
+    recorder.onstop?.(new Event("stop"))
+    expect((await pending).blob.size).toBe(2)
+  })
+
+  it("gives up on a stop that never confirms, keeping the data and marking the take cut off", async () => {
+    const onChunk = vi.fn()
+    const Audio = fakeAudio(0)
+    const { active, recorder } = setup(Audio, { onChunk, Recorder: StuckRecorder })
+    recorder.chunk()
+    const pending = active.stop()
+    await vi.advanceTimersByTimeAsync(STOP_TIMEOUT_MS)
+    const take = await pending
+    expect(take.blob.size).toBe(1)
+    expect(take.cutOff).toBe(true)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("never confirmed"))
+    // The sampler and context are gone, and late data isn't saved anywhere.
+    expect(Audio.closes).toBe(1)
+    recorder.chunk()
+    expect(onChunk).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays quiet when a discarded recorder stops (Start over is not a dead camera), and drops late data and errors", () => {
     const onEnded = vi.fn()
     const onChunk = vi.fn()
-    const { active, recorder } = setup(fakeAudio(0), onEnded, onChunk)
+    const { active, recorder } = setup(fakeAudio(0), { onEnded, onChunk })
     recorder.chunk()
     active.cancel()
     expect(recorder.state).toBe("inactive")
@@ -206,5 +265,7 @@ describe("startRecording's length and lifetime", () => {
     // A chunk the browser flushes after cancel must not be saved into the next take.
     recorder.chunk()
     expect(onChunk).toHaveBeenCalledTimes(1)
+    recorder.onerror?.({ error: new Error("late") })
+    expect(console.error).not.toHaveBeenCalled()
   })
 })

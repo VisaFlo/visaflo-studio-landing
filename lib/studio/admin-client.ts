@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import type { User } from "firebase/auth"
 
 import { UNVERIFIED_CODE } from "@/lib/studio/admin"
-import { describeLoadError } from "@/lib/studio/errors"
+import { describeLoadError, parseJsonObject } from "@/lib/studio/errors"
 
 export type Load<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "unverified" } | { status: "error"; message: string }
 
@@ -13,32 +13,27 @@ type Body = Record<string, unknown> & { error?: string; code?: string }
 type AdminPath = `/api/admin/${string}`
 
 // One request to /api/admin/*, turned into a Load state. The body is read as
-// text first so a non-JSON answer (a gateway's HTML timeout page) is logged
-// with its status instead of vanishing into a parse error.
+// text and parsed by hand so a non-JSON answer (a gateway's HTML timeout
+// page) is logged with its status instead of vanishing into a parse error.
 export async function adminRequest<T>(user: User, path: AdminPath, pick: (body: Body) => T | undefined): Promise<Load<T>> {
   try {
     // A fresh token, so a just-verified email counts right away.
     const token = await user.getIdToken(true)
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } })
     const raw = await response.text()
-    let body: Body = {}
-    try {
-      body = JSON.parse(raw) as Body
-    } catch {
-      console.error(`${path} answered with something other than JSON`, response.status, raw.slice(0, 300))
+    const body = parseJsonObject(path, response.status, raw)
+    if (body?.code === UNVERIFIED_CODE) return { status: "unverified" }
+    const data = response.ok && body ? pick(body) : undefined
+    if (data !== undefined) return { status: "ready", data }
+    if (response.ok) {
+      // Valid JSON of the wrong shape (or a non-JSON 200, logged above): the
+      // API and this page disagree, so keep the body for whoever looks.
+      if (body) console.error(`${path} answered ${response.status} with an unexpected body`, raw.slice(0, 300))
+      return { status: "error", message: "The server answered in a form this page doesn't understand. Reload to try again." }
     }
-    if (body.code === UNVERIFIED_CODE) return { status: "unverified" }
-    const data = response.ok ? pick(body) : undefined
-    if (data === undefined) {
-      if (response.ok) {
-        // Valid JSON, wrong shape: the API and this page disagree, which a
-        // reload won't fix, so keep the body for whoever looks.
-        console.error(`${path} answered ${response.status} with an unexpected body`, raw.slice(0, 300))
-        return { status: "error", message: "The server answered in a form this page doesn't understand. Reload to try again." }
-      }
-      return { status: "error", message: typeof body.error === "string" ? body.error : `Request failed (${response.status}). Reload to try again.` }
-    }
-    return { status: "ready", data }
+    const message = typeof body?.error === "string" ? body.error.trim() : ""
+    if (body && !message) console.error(`${path} answered without a usable error message`, response.status, raw.slice(0, 300))
+    return { status: "error", message: message || `Request failed (${response.status}). Reload to try again.` }
   } catch (error) {
     console.error(`${path} failed`, error)
     return { status: "error", message: describeLoadError(error) }

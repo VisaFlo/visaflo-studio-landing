@@ -714,21 +714,26 @@ export function ReviewStep({
   error,
   notice,
   onConsent,
+  onPlayable,
   onSubmit,
   onRedo,
 }: {
   recording: Recording
   consent: boolean
   error?: string | null
-  /** Shown above the checks, e.g. for a take recovered after a reload. */
+  /** Shown above the checks, e.g. for a take recovered after a reload or cut off early. */
   notice?: string | null
   onConsent: (value: boolean) => void
+  /** Whether this browser could play the take back; false points at a damaged file. */
+  onPlayable: (playable: boolean) => void
   onSubmit: () => void
   onRedo: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
-  const [unplayable, setUnplayable] = useState(false)
+  // The URL the player failed on, so a new take gets a fresh verdict.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const unplayable = failedUrl === recording.url
   const checks = recording.checks
   const short = recording.seconds < 45
   // A check that never ran isn't a complaint.
@@ -738,20 +743,27 @@ export function ReviewStep({
     <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
       <div className="relative aspect-[9/16] h-[min(640px,70vh)] shrink-0 overflow-hidden rounded-[28px] bg-stone-700">
         <video
+          key={recording.url}
           ref={player}
           src={recording.url}
           playsInline
           controls={playing}
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            setPlaying(true)
+            onPlayable(true)
+          }}
           onError={(event) => {
             console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
-            setUnplayable(true)
+            setFailedUrl(recording.url)
+            onPlayable(false)
           }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
         {unplayable && (
           <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            This browser can&apos;t play the recording back. You can still submit it, or record again.
+            {notice
+              ? "This part of the recording can't be played back here. You can still submit it, or record again."
+              : "This recording looks damaged and may not play for us either. We recommend recording again."}
           </p>
         )}
         {!playing && (

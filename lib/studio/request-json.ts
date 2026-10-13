@@ -1,4 +1,4 @@
-import { parseChecks, type RecordingChecks } from "@/lib/studio/checks"
+import { isPlainObject, parseChecks, type RecordingChecks } from "@/lib/studio/checks"
 
 // request.json is written by the person's own browser under their own uid
 // (lib/studio/upload.ts), and the same fields arrive in the body of
@@ -16,25 +16,26 @@ export const LIMITS = {
   recordingPath: 300,
 } as const
 
+/** Longest length kept: a day, far above the flow's MAX_SECONDS. */
+const MAX_SECONDS_KEPT = 24 * 60 * 60
+
 // Free text: trimmed and cut at `max`.
 export function text(value: unknown, max: number = LIMITS.text): string | undefined {
   return typeof value === "string" ? value.trim().slice(0, max) || undefined : undefined
 }
 
-// An identifier (submission id, object path): cutting one would make a
-// different identifier, so one over `max` is refused instead.
+// An identifier (submission id, object path): exactly as sent or not at all,
+// since a cut or trimmed identifier is a different identifier.
 export function identifier(value: unknown, max: number): string | undefined {
-  if (typeof value !== "string") return undefined
-  const trimmed = value.trim()
-  return trimmed && trimmed.length <= max ? trimmed : undefined
+  return typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined
 }
 
-// One plain address. Anything with whitespace, "?" or "&" is dropped: the
-// admin page puts this in a mailto: link, where those would add recipients
-// or a body.
+// One plain address. Anything with whitespace or a character that could add
+// recipients or a body once the admin page puts it in a mailto: link
+// (? & % , ; #) is dropped.
 export function asEmail(value: unknown): string | undefined {
   const candidate = text(value)
-  return candidate && /^[^\s@?&]+@[^\s@?&]+$/.test(candidate) ? candidate : undefined
+  return candidate && /^[^\s@?&%,;#]+@[^\s@?&%,;#]+$/.test(candidate) ? candidate : undefined
 }
 
 // A timestamp Date.parse understands, normalised to ISO: the list is sorted
@@ -46,10 +47,12 @@ export function isoDate(value: unknown): string | undefined {
   return Number.isNaN(time) ? undefined : new Date(time).toISOString()
 }
 
-// A recording length: finite, positive, whole seconds.
+// A recording length in whole seconds: a number or a decimal string (not
+// whatever Number() would coerce), positive once rounded, and at most a day.
 export function seconds(value: unknown): number | undefined {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
+  const numeric = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN
+  const n = Math.round(numeric)
+  return Number.isFinite(n) && n > 0 && n <= MAX_SECONDS_KEPT ? n : undefined
 }
 
 export type RequestJson = {
@@ -65,20 +68,19 @@ export type RequestJson = {
 }
 
 export function readRequestJson(raw: unknown): RequestJson {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
-  const v = raw as Record<string, unknown>
+  if (!isPlainObject(raw)) return {}
   const out: RequestJson = {}
   const put = <K extends keyof RequestJson>(key: K, value: RequestJson[K] | undefined) => {
     if (value !== undefined) out[key] = value
   }
-  put("email", asEmail(v.email))
-  put("name", text(v.name))
-  put("firm", text(v.firm))
-  put("topicTitle", text(v.topicTitle, LIMITS.topicTitle))
-  put("recordingSeconds", seconds(v.recordingSeconds))
-  put("checks", parseChecks(v.checks))
-  put("consent", text(v.consent, LIMITS.consent))
-  put("consentAt", isoDate(v.consentAt))
-  put("createdAt", isoDate(v.createdAt))
+  put("email", asEmail(raw.email))
+  put("name", text(raw.name))
+  put("firm", text(raw.firm))
+  put("topicTitle", text(raw.topicTitle, LIMITS.topicTitle))
+  put("recordingSeconds", seconds(raw.recordingSeconds))
+  put("checks", parseChecks(raw.checks))
+  put("consent", text(raw.consent, LIMITS.consent))
+  put("consentAt", isoDate(raw.consentAt))
+  put("createdAt", isoDate(raw.createdAt))
   return out
 }

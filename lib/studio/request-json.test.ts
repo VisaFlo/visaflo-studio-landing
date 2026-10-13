@@ -14,10 +14,12 @@ describe("text", () => {
 })
 
 describe("identifier", () => {
-  it("rejects rather than truncates: an over-long id is not a different id", () => {
+  it("takes an id exactly as sent or not at all: a cut or trimmed id is a different id", () => {
     expect(identifier("20261009T211755-393dbaa7", LIMITS.submissionId)).toBe("20261009T211755-393dbaa7")
     expect(identifier("x".repeat(65), LIMITS.submissionId)).toBeUndefined()
-    expect(identifier(" padded ", 64)).toBe("padded")
+    // Not trimmed either: the route's own shape check decides on the spaces.
+    expect(identifier(" padded ", 64)).toBe(" padded ")
+    expect(identifier("", 64)).toBeUndefined()
     expect(identifier(12, 64)).toBeUndefined()
   })
 })
@@ -28,6 +30,10 @@ describe("asEmail", () => {
     expect(asEmail(" A@B.C ")).toBe("A@B.C")
     expect(asEmail("x@y.com?bcc=evil@z.com")).toBeUndefined()
     expect(asEmail("x@y.com&body=hi")).toBeUndefined()
+    expect(asEmail("a@b.c%3Fbcc=x%40y.z")).toBeUndefined()
+    expect(asEmail("a@b.c,c@d.e")).toBeUndefined()
+    expect(asEmail("a@b.c;c@d.e")).toBeUndefined()
+    expect(asEmail("a@b.c#x")).toBeUndefined()
     expect(asEmail("not an email")).toBeUndefined()
     expect(asEmail("")).toBeUndefined()
     expect(asEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
@@ -46,14 +52,20 @@ describe("isoDate", () => {
 })
 
 describe("seconds", () => {
-  it("keeps only a positive, finite length, rounded", () => {
+  it("keeps only a positive, finite length within a day, rounded", () => {
     expect(seconds(61.6)).toBe(62)
     expect(seconds("61")).toBe(61)
     expect(seconds(-5)).toBeUndefined()
     expect(seconds(0)).toBeUndefined()
     expect(seconds("abc")).toBeUndefined()
     expect(seconds(Infinity)).toBeUndefined()
-    expect(seconds(1e999)).toBeUndefined()
+    expect(seconds(1e15)).toBeUndefined()
+  })
+  it("reads only a number or a decimal string, not whatever Number() would coerce", () => {
+    expect(seconds(true)).toBeUndefined()
+    expect(seconds([61])).toBeUndefined()
+    expect(seconds("0x10")).toBeUndefined()
+    expect(seconds(null)).toBeUndefined()
   })
 })
 

@@ -2,9 +2,10 @@
 
 // The sample video VisaFlo edits from this recording is a vertical short, so
 // the recording is vertical from the start. A phone held upright is recorded
-// in its own portrait frame (exactly 9:16, or 3:4 and so a little wider); a
-// laptop webcam gives 16:9, and we keep only its middle 9:16 column (the
-// preview shows exactly that, so people frame themselves for it).
+// in its own frame (usually 9:16, sometimes 3:4 and so a little wider; any
+// portrait or square frame is kept whole); a laptop webcam gives 16:9, and
+// we keep only its middle 9:16 column (the preview shows exactly that, so
+// people frame themselves for it).
 
 export type Crop = { x: number; y: number; w: number; h: number }
 
@@ -61,8 +62,8 @@ export function portraitStream(source: MediaStream): PortraitStream {
   if (!ctx) throw new Error("Canvas 2D is unavailable, so the camera frame can't be cropped")
 
   // The settings above are what the track claims; the frames are what count.
-  // This fires during the align step, before any take can start, so the
-  // canvas is never resized mid-recording.
+  // In practice this fires within the align step, well before a take can
+  // start, so the canvas is not resized mid-recording; nothing enforces it.
   video.addEventListener(
     "loadedmetadata",
     () => {
@@ -79,9 +80,9 @@ export function portraitStream(source: MediaStream): PortraitStream {
   // readyState 2 is HAVE_CURRENT_DATA: a frame is there to copy. A timer
   // rather than requestAnimationFrame: rAF stops completely while the tab is
   // hidden; a timer keeps firing, throttled to about once a second, and in
-  // Chrome to once a minute after roughly ten seconds hidden (Chrome 109+;
-  // five minutes before that). That gives a hidden tab a chance of a
-  // stuttering recording instead of a certain freeze.
+  // desktop Chrome to once a minute after roughly ten seconds hidden
+  // (Chrome 109+; five minutes before that). That gives a hidden tab a
+  // chance of a stuttering recording instead of a certain freeze.
   const draw = () => {
     if (video.readyState >= 2) ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
   }
