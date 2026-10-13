@@ -708,12 +708,18 @@ function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
   )
 }
 
+/**
+ * A word about the take on review (recovered after a reload, or cut off), and
+ * whether it is only part of what was recorded, which decides what an
+ * unplayable file is taken to mean.
+ */
+export type ReviewNotice = { text: string; partial: boolean }
+
 export function ReviewStep({
   recording,
   consent,
   error,
   notice,
-  partial = false,
   onConsent,
   onPlayable,
   onSubmit,
@@ -722,10 +728,7 @@ export function ReviewStep({
   recording: Recording
   consent: boolean
   error?: string | null
-  /** Shown above the checks, e.g. for a take recovered after a reload or cut off early. */
-  notice?: string | null
-  /** The take is only part of what was recorded (cut off, or recovered before Finish). */
-  partial?: boolean
+  notice?: ReviewNotice | null
   onConsent: (value: boolean) => void
   /**
    * Whether this browser could play the take back (true once playback really
@@ -737,6 +740,9 @@ export function ReviewStep({
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
+  // A play() that was refused without the element reporting an error: the
+  // button must not look dead.
+  const [playRefused, setPlayRefused] = useState(false)
   const checks = recording.checks
   // The flow records the player's "no" in the take's checks (and keeps it),
   // so the take itself says whether it played.
@@ -744,6 +750,17 @@ export function ReviewStep({
   const short = recording.seconds < 45
   // A check that never ran isn't a complaint.
   const allGood = !unplayable && (!checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
+
+  function play() {
+    setPlayRefused(false)
+    void player.current?.play().catch((error: unknown) => {
+      console.warn("Playback didn't start", error)
+      // NotSupportedError is the file, and sticks; anything else (an abort
+      // from a remount racing the press) is worth another try.
+      if ((error as { name?: string } | null)?.name === "NotSupportedError") onPlayable(false)
+      else setPlayRefused(true)
+    })
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
@@ -755,7 +772,8 @@ export function ReviewStep({
           playsInline
           controls={playing}
           onPlay={() => setPlaying(true)}
-          // `playing`, not `play`: frames are really decoding by then.
+          // `playing`, not `play`: `play` fires on the press; `playing` only
+          // once the browser has decoded enough to advance.
           onPlaying={() => onPlayable(true)}
           onError={(event) => {
             console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
@@ -763,18 +781,22 @@ export function ReviewStep({
           }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
-        {unplayable && (
+        {unplayable ? (
           <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            {partial
+            {notice?.partial
               ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
               : "This recording looks damaged and may not play for us either. We recommend recording again."}
           </p>
+        ) : (
+          playRefused && (
+            <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">Playback didn&apos;t start. Try again.</p>
+          )
         )}
         {!playing && (
           <button
             type="button"
             aria-label="Play recording"
-            onClick={() => void player.current?.play().catch((error: unknown) => console.warn("Playback didn't start", error))}
+            onClick={play}
             className="absolute top-1/2 left-1/2 flex size-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/92"
           >
             <Play className="size-7 translate-x-0.5 fill-stone-950 text-stone-950" aria-hidden />
@@ -791,10 +813,11 @@ export function ReviewStep({
         {notice && (
           <p className="m-0 flex items-start gap-2 bg-stone-50 p-3 text-[14px] leading-[1.5] text-stone-700">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-[#c2410c]" aria-hidden />
-            {notice}
+            {notice.text}
           </p>
         )}
-        {checks && (
+        {/* A recovered take's two readings are placeholders, not results. */}
+        {checks && !checks.recovered && (
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
             <Chip ok={checks.faceSeen}>
               {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}

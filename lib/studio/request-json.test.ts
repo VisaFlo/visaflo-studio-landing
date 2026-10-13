@@ -40,7 +40,9 @@ describe("asEmail", () => {
   it("refuses an over-long address rather than cutting it into a different one", () => {
     expect(asEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
     expect(asEmail(`dan@firm.ca${"x".repeat(300)}`)).toBeUndefined()
-    expect(asEmail(`${"a".repeat(240)}@b.c`)).toBe(`${"a".repeat(240)}@b.c`)
+    const longest = `${"a".repeat(LIMITS.email - 4)}@b.c`
+    expect(asEmail(longest)).toBe(longest)
+    expect(asEmail(`a${longest}`)).toBeUndefined()
   })
 })
 

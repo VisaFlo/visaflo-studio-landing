@@ -260,7 +260,7 @@ describe("startRecording's length and lifetime", () => {
     expect(console.error).not.toHaveBeenCalled()
   })
 
-  it("answers a second stop() with the same take, and a stop() after cancel() at once", async () => {
+  it("answers a second stop() with the same take, and a stop() after cancel() at once, marked cut off", async () => {
     const { active, recorder } = setup(fakeAudio(0))
     recorder.chunk()
     const first = active.stop()
@@ -270,18 +270,45 @@ describe("startRecording's length and lifetime", () => {
     const discarded = setup(fakeAudio(0), { Recorder: StuckRecorder })
     discarded.active.cancel()
     const late = await discarded.active.stop()
-    expect(late.cutOff).toBe(false)
+    expect(late.cutOff).toBe(true)
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it("lets cancel() end a stop() that is still waiting, without the give-up firing later", async () => {
+  it("lets cancel() end a stop() that is still waiting, marked cut off, without the give-up firing later", async () => {
     const { active, recorder } = setup(fakeAudio(0), { Recorder: StuckRecorder })
     recorder.chunk()
     const pending = active.stop()
     active.cancel()
-    expect((await pending).blob.size).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
+    const take = await pending
+    expect(take.blob.size).toBe(1)
+    expect(take.cutOff).toBe(true)
     vi.advanceTimersByTime(STOP_TIMEOUT_MS)
     expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("drops a late chunk or error once a normal stop has settled, so it can't reach the saved take or the log", async () => {
+    const onChunk = vi.fn()
+    const onEnded = vi.fn()
+    const { active, recorder } = setup(fakeAudio(0), { onChunk, onEnded })
+    recorder.chunk()
+    await active.stop()
+    recorder.chunk()
+    recorder.onerror?.({ error: new Error("late") })
+    recorder.onstop?.(new Event("stop"))
+    expect(onChunk).toHaveBeenCalledTimes(1)
+    expect(onEnded).not.toHaveBeenCalled()
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("drops a late chunk after Finish collects a take whose recorder had already died", async () => {
+    const onChunk = vi.fn()
+    const { active, recorder } = setup(fakeAudio(0), { onChunk, onEnded: vi.fn() })
+    recorder.chunk()
+    recorder.die(new Error("encoder"))
+    await active.stop()
+    recorder.chunk()
+    expect(onChunk).toHaveBeenCalledTimes(1)
   })
 
   it("gives up on a stop that never confirms, keeping the data and marking the take cut off", async () => {

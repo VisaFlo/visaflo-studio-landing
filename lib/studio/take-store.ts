@@ -17,8 +17,12 @@ export type StoredTake = {
   mime: string
   source: "camera"
   startedAt: number
-  /** Set when the person pressed Finish; absent if the take was cut off (then nothing was measured). */
-  finished?: { seconds: number; checks: RecordingChecks }
+  /**
+   * Set once Finish completed; absent when the page closed mid-recording
+   * (then nothing was measured). `cutOff` is the recorder's verdict that the
+   * take ended early, kept so a reload tells the same story.
+   */
+  finished?: { seconds: number; checks: RecordingChecks; cutOff?: boolean }
 }
 
 let opening: Promise<IDBDatabase> | null = null

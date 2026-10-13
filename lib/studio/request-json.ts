@@ -14,10 +14,11 @@ export const LIMITS = {
   timestamp: 40,
   submissionId: 64,
   recordingPath: 300,
+  /** An address (RFC 5321's 256-octet path less its angle brackets); longer ones are refused, not cut. */
+  email: 254,
+  /** A recording length: a day, far above the flow's MAX_SECONDS. */
+  seconds: 24 * 60 * 60,
 } as const
-
-/** Longest length kept: a day, far above the flow's MAX_SECONDS. */
-const MAX_SECONDS_KEPT = 24 * 60 * 60
 
 // Free text: trimmed and cut at `max`.
 export function text(value: unknown, max: number = LIMITS.text): string | undefined {
@@ -30,15 +31,13 @@ export function identifier(value: unknown, max: number): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined
 }
 
-/** The longest address kept (RFC 5321's limit); longer ones are refused, not cut, since a cut address is a different address. */
-const MAX_EMAIL = 254
-
-// One plain address, trimmed. Anything with inner whitespace or a character
-// that could add recipients or a body once the admin page puts it in a
-// mailto: link (? & % , ; #) is dropped.
+// One plain address, trimmed. An over-long one is refused rather than cut
+// (a cut address is a different address), and anything with inner whitespace
+// or a character that could add recipients or a body once the admin page
+// puts it in a mailto: link (? & % , ; #) is dropped.
 export function asEmail(value: unknown): string | undefined {
   const candidate = typeof value === "string" ? value.trim() : ""
-  return candidate.length > 0 && candidate.length <= MAX_EMAIL && /^[^\s@?&%,;#]+@[^\s@?&%,;#]+$/.test(candidate) ? candidate : undefined
+  return candidate.length > 0 && candidate.length <= LIMITS.email && /^[^\s@?&%,;#]+@[^\s@?&%,;#]+$/.test(candidate) ? candidate : undefined
 }
 
 // A timestamp Date.parse understands, normalised to ISO: the list is sorted
@@ -55,7 +54,7 @@ export function isoDate(value: unknown): string | undefined {
 export function seconds(value: unknown): number | undefined {
   const numeric = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN
   const n = Math.round(numeric)
-  return Number.isFinite(n) && n > 0 && n <= MAX_SECONDS_KEPT ? n : undefined
+  return Number.isFinite(n) && n > 0 && n <= LIMITS.seconds ? n : undefined
 }
 
 export type RequestJson = {

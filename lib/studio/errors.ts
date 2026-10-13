@@ -2,10 +2,11 @@ import { isPlainObject } from "@/lib/studio/checks"
 
 // Words for the person when a Firebase call or a fetch fails. A Firebase
 // error carries a code, which is shown so it can be looked up; its message is
-// never shown. (A code-less Error's message is shown only on the admin pages,
-// by describeLoadError, never on /start.) A fetch that never reached the
-// server is a TypeError whose message says so. Only a network problem is
-// fixed by trying again, so each message says which it was.
+// never shown. (Apart from an ApiError, whose message is ours, a code-less
+// Error's message is shown only on the admin pages, by describeLoadError,
+// never on /start.) A fetch that never reached the server is a TypeError
+// whose message says so. Only a network problem is fixed by trying again, so
+// each message says which it was.
 
 /** What one of our API routes answered: a message written for the person, safe to show as is. */
 export class ApiError extends Error {

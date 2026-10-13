@@ -16,12 +16,21 @@ describe("parseChecks", () => {
   })
 })
 
-describe("parseChecks: the review's playback result", () => {
+describe("parseChecks: the review's playback result and the recovered marker", () => {
   it("is carried only when the browser sent a yes or a no", () => {
     expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: false })).toStrictEqual({ faceSeen: true, voiceHeard: true, playable: false })
     expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: "x" })).toStrictEqual({ faceSeen: true, voiceHeard: true })
     expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: null })).toStrictEqual({ faceSeen: true, voiceHeard: true })
     expect(parseChecks({ faceSeen: true, voiceHeard: true })).toStrictEqual({ faceSeen: true, voiceHeard: true })
+  })
+  it("keeps the recovered marker only as the literal true", () => {
+    expect(parseChecks({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toStrictEqual({
+      faceSeen: null,
+      voiceHeard: null,
+      recovered: true,
+      playable: false,
+    })
+    expect(parseChecks({ faceSeen: null, voiceHeard: null, recovered: "yes" })).toStrictEqual({ faceSeen: null, voiceHeard: null })
   })
 })
 
@@ -37,9 +46,9 @@ describe("markPlayable", () => {
     const checks = { ...measured, playable: true }
     expect(markPlayable(checks, true)).toBe(checks)
   })
-  it("doesn't invent measurements for a take that has none, except to record that it wouldn't play", () => {
+  it("doesn't invent measurements for a take that has none, except to record, marked as recovered, that it wouldn't play", () => {
     expect(markPlayable(undefined, true)).toBeUndefined()
-    expect(markPlayable(undefined, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, playable: false })
+    expect(markPlayable(undefined, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })
   })
 })
 
@@ -58,6 +67,9 @@ describe("checkFlags", () => {
   it("says so when a finished request carries no checks at all, so it can't pass for a clean take", () => {
     expect(checkFlags(undefined)).toEqual(["Checks not recorded"])
   })
+  it("says the same for a recovered take whose only reading is that it wouldn't play, not that the checks didn't run", () => {
+    expect(checkFlags({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toEqual(["Checks not recorded", "Review couldn't play it"])
+  })
 })
 
 describe("describeChecks", () => {
@@ -67,6 +79,11 @@ describe("describeChecks", () => {
     expect(describeChecks({ faceSeen: null, voiceHeard: true })).toBe("face not checked, voice heard")
     expect(describeChecks({ faceSeen: true, voiceHeard: true, playable: false })).toBe("face seen, voice heard, REVIEW COULDN'T PLAY IT")
     expect(describeChecks({ faceSeen: true, voiceHeard: true, playable: true })).toBe("face seen, voice heard")
+  })
+  it("tells a recovered take from one whose checks failed to run", () => {
+    expect(describeChecks({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toBe(
+      "no checks saved (take recovered after the page closed mid-recording), REVIEW COULDN'T PLAY IT",
+    )
   })
 })
 

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
   if (!isPlainObject(parsed)) {
-    console.error(`Request body from ${user.uid} isn't an object`, { body: parsed })
+    console.error(`Request body from ${user.uid} isn't an object`, JSON.stringify(parsed)?.slice(0, 300))
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
   const body = parsed

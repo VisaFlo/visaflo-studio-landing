@@ -49,7 +49,8 @@ export type StoppedTake = {
   /**
    * The take ends early: the recorder reported an error at any point (before
    * Finish the flow also hears it through `onEnded` and normally discards the
-   * take), or never confirmed stopping within stop()'s timeout.
+   * take), never confirmed stopping within stop()'s timeout, or was cancelled
+   * while a stop() was waiting.
    */
   cutOff: boolean
 }
@@ -58,13 +59,15 @@ export type ActiveRecorder = {
   /**
    * Finishes the take. Resolves once the recorder has handed over its last
    * data, or after `timeoutMs` with what there is (then `cutOff`). Cleans up
-   * either way, and a second call returns the same promise. voiceHeard is
-   * null when the mic couldn't be read for enough of the take to say anything.
+   * either way. A second call returns the same promise (its own `timeoutMs`
+   * is ignored). voiceHeard is null when the mic couldn't be read for enough
+   * of the take to say anything.
    */
   stop: (timeoutMs?: number) => Promise<StoppedTake>
   /**
    * Discards the take: no chunk, error or `onEnded` is reported after this.
-   * A stop() already waiting resolves at once with what there is.
+   * A stop() already waiting, or one made later, resolves at once with the
+   * chunks gathered so far, marked `cutOff`.
    */
   cancel: () => void
   /** Mic loudness right now, 0 to 1. */
@@ -89,7 +92,7 @@ export type RecorderOptions = {
 const VOICE_RMS = 0.02
 /** Milliseconds above VOICE_RMS over the whole take for the voice check to pass. */
 const VOICE_NEEDED_MS = 2000
-/** A tick that ran at least this late (a busy main thread) is counted as this much, not as the whole gap. */
+/** A tick that comes this long or longer after the previous one (a busy main thread) counts as this much, not as the whole gap. */
 const MAX_TICK_MS = 250
 /** How long stop() waits for the recorder's final data before keeping what it has. */
 export const STOP_TIMEOUT_MS = 5000
@@ -199,11 +202,23 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
     }
   }
 
+  // How a stop() is answered: `stopping` is the waiting caller, `giveUp` its
+  // timer, and `settle` answers once and drops both.
+  let stopping: ((take: StoppedTake) => void) | null = null
+  let giveUp: number | undefined
+  const settle = (take: StoppedTake) => {
+    window.clearTimeout(giveUp)
+    const waiting = stopping
+    stopping = null
+    waiting?.(take)
+  }
+  let stopped: Promise<StoppedTake> | null = null
+  let ended = false
+  let cancelled = false
+
   // Installed before start(), not inside stop(): a recorder that stops on
   // its own must be noticed, or the flow keeps the script clock running and
   // the mic sampler alive over a dead take.
-  let stopping: ((take: StoppedTake) => void) | null = null
-  let ended = false
   recorder.onerror = (event) => {
     failed = true
     console.error("MediaRecorder error", (event as { error?: unknown }).error ?? event)
@@ -227,14 +242,6 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
     throw error
   }
 
-  let stopped: Promise<StoppedTake> | null = null
-  let cancelled = false
-  let giveUp: number | undefined
-  const settle = (take: StoppedTake) => {
-    window.clearTimeout(giveUp)
-    stopping?.(take)
-  }
-
   return {
     stop: (timeoutMs = STOP_TIMEOUT_MS) =>
       (stopped ??= new Promise((resolve) => {
@@ -253,8 +260,9 @@ export function startRecording(stream: MediaStream, { onChunk, onEnded }: Record
         if (recorder.state !== "inactive") recorder.stop()
       })),
     cancel: () => {
+      // Whatever a stop() gets from here on is incomplete by definition.
       cancelled = true
-      // A stop() still waiting gets what there is now; nothing else follows.
+      failed = true
       if (stopping) settle(finish())
       cleanup()
       detach()
