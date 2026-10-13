@@ -5,9 +5,11 @@
 // take store, request.json, the email and /admin.
 export type Check = boolean | null
 
+// Read-only: a take's checks are replaced, never edited in place (see
+// markPlayable), and RECOVERED_CHECKS is shared.
 export type RecordingChecks = {
-  faceSeen: Check
-  voiceHeard: Check
+  readonly faceSeen: Check
+  readonly voiceHeard: Check
   /**
    * Whether the review page's player could play the take back: false means
    * the file is probably damaged. Unlike the two checks above this is not
@@ -15,17 +17,17 @@ export type RecordingChecks = {
    * never got going and no error was reported), which is not a flag. Older
    * request.json files have no such field either.
    */
-  playable?: boolean
+  readonly playable?: boolean
   /**
    * The live results were lost with the page (a take recovered after it
    * closed mid-recording): the two readings above are placeholders (always
    * null). Read as "checks not recorded", never as "the checks didn't run".
    */
-  recovered?: true
+  readonly recovered?: true
 }
 
 /** The checks of a take recovered after the page closed mid-recording: nothing saved, says so. */
-export const RECOVERED_CHECKS: RecordingChecks = { faceSeen: null, voiceHeard: null, recovered: true }
+export const RECOVERED_CHECKS: RecordingChecks = Object.freeze({ faceSeen: null, voiceHeard: null, recovered: true })
 
 const check = (value: unknown): Check => (value === true ? true : value === false ? false : null)
 
@@ -40,9 +42,8 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 // marker can't be real and are not carried.
 export function parseChecks(raw: unknown): RecordingChecks | undefined {
   if (!isPlainObject(raw)) return undefined
-  const checks: RecordingChecks = raw.recovered === true ? { ...RECOVERED_CHECKS } : { faceSeen: check(raw.faceSeen), voiceHeard: check(raw.voiceHeard) }
-  if (typeof raw.playable === "boolean") checks.playable = raw.playable
-  return checks
+  const playable = typeof raw.playable === "boolean" ? { playable: raw.playable } : {}
+  return raw.recovered === true ? { ...RECOVERED_CHECKS, ...playable } : { faceSeen: check(raw.faceSeen), voiceHeard: check(raw.voiceHeard), ...playable }
 }
 
 // The review player's verdict added to a take's checks. A "no" sticks for the

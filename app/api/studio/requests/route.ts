@@ -57,6 +57,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "Agree to the consent first." }, { status: 400 })
   }
 
+  // This client always sends a checks object; one that doesn't parse is a
+  // client bug worth a line, but not worth losing the request over.
+  const checks = parseChecks(body.checks)
+  if (body.checks !== undefined && !checks) console.error(`Unreadable checks from ${user.uid}`, JSON.stringify(body.checks)?.slice(0, 300))
+
   try {
     await sendStudioRequestEmail({
       uid: user.uid,
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
       recordingPath,
       recordingSeconds: seconds(body.recordingSeconds) ?? 0,
       recordingSource: "camera",
-      checks: parseChecks(body.checks),
+      checks,
       consentAt,
     })
   } catch (error) {

@@ -33,6 +33,8 @@ describe("parseChecks: the review's playback result and the recovered marker", (
     // Readings next to the marker can't be real; they are not carried.
     expect(parseChecks({ faceSeen: true, voiceHeard: false, recovered: true })).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true })
     expect(parseChecks({ faceSeen: null, voiceHeard: null, recovered: "yes" })).toStrictEqual({ faceSeen: null, voiceHeard: null })
+    // A copy, never the shared constant itself.
+    expect(parseChecks({ recovered: true })).not.toBe(RECOVERED_CHECKS)
   })
 })
 
@@ -52,6 +54,7 @@ describe("markPlayable", () => {
     expect(markPlayable(RECOVERED_CHECKS, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })
     expect(markPlayable(RECOVERED_CHECKS, true)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: true })
     expect(RECOVERED_CHECKS).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true })
+    expect(Object.isFrozen(RECOVERED_CHECKS)).toBe(true)
   })
 })
 

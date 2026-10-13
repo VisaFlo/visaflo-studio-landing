@@ -85,6 +85,8 @@ export function CaptureFlow() {
   // Start over may still discard it, by cancelling this), and a camera that
   // dies meanwhile must not interrupt it.
   const finishing = useRef<ActiveRecorder | null>(null)
+  // Why the camera died during that Finish, for whichever exit comes next.
+  const cameraLost = useRef<string | null>(null)
   // What the framing step saw (null: the tracker never ran) and a tally of
   // the readings while recording, which decide the recording's face check.
   const alignFaceSeen = useRef<Check>(null)
@@ -202,10 +204,15 @@ export function CaptureFlow() {
   const abandonCamera = useCallback(
     (reason: string) => {
       // A Finish already waiting on its data owns the take: the dead tracks
-      // sit until finishRecording releases them and goes on to the review
-      // with its own notice (cutOff, if the recorder noticed). Releasing them
-      // here would unmount the script step onto a blank page meanwhile.
-      if (finishing.current) return
+      // sit until the Finish settles (finishRecording releases them on its
+      // way to the review, with its own notice: cutOff, if the recorder
+      // noticed). Releasing them here would unmount the script step onto a
+      // blank page meanwhile. The reason is kept for a Start over pressed
+      // before then, which must not reuse the dead camera.
+      if (finishing.current) {
+        cameraLost.current = reason
+        return
+      }
       // Otherwise only a take in progress is abandoned; with nothing
       // recording (the align step) a saved take is the review step's to keep
       // or clear and stays.
@@ -327,10 +334,21 @@ export function CaptureFlow() {
     recorder.current = null
     active?.cancel()
     // A Finish still waiting is ended now, so its recorder can't save a late
-    // chunk under the take being cleared, and its result is dropped below.
+    // chunk under the take being cleared; finishRecording drops its result,
+    // since take.current has moved on.
     finishing.current?.cancel()
     finishing.current = null
     if (user) void clearTake(user.uid)
+    // A camera that died during that Finish was only noted: say so now
+    // rather than frame the person over its dead tracks.
+    const lost = cameraLost.current
+    cameraLost.current = null
+    if (lost) {
+      stopCamera()
+      setCameraError(lost)
+      setStep("camera")
+      return
+    }
     setStep(stream ? "align" : "camera")
   }
 
@@ -352,11 +370,15 @@ export function CaptureFlow() {
     // wins. (A camera that died meanwhile does not: abandonCamera leaves a
     // Finish in flight alone, so the take still reaches the review.)
     if (take.current !== started) return
+    // The take is in hand, so a camera that died meanwhile only matters if
+    // there is nothing to show for it.
+    const lost = cameraLost.current
+    cameraLost.current = null
     if (result.blob.size === 0) {
       // A recorder that produced nothing must not reach the review as a
       // black clip that can be submitted.
       console.error("The recorder produced no data", { seconds: result.seconds, mime: result.mime })
-      abandonCamera("Nothing was recorded. Try again, or open this page in Chrome or Safari, or on your phone.")
+      abandonCamera(lost ?? "Nothing was recorded. Try again, or open this page in Chrome or Safari, or on your phone.")
       return
     }
     stopCamera()

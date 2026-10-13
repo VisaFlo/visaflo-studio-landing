@@ -92,10 +92,17 @@ describe("POST /api/studio/requests", () => {
   })
 
   it("logs at most 300 characters of a body that isn't an object", async () => {
-    expect((await postRaw(JSON.stringify(Array(400).fill("x")))).status).toBe(400)
-    const logged = vi.mocked(console.error).mock.calls.at(-1)?.[1]
-    expect(typeof logged).toBe("string")
-    expect((logged as string).length).toBeLessThanOrEqual(300)
+    const body = JSON.stringify(Array(400).fill("x"))
+    expect((await postRaw(body)).status).toBe(400)
+    expect(console.error).toHaveBeenCalledTimes(1)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("u1"), body.slice(0, 300))
+  })
+
+  it("logs checks it can't read, since this client always sends an object, and mails the request without them", async () => {
+    const response = await post({ ...BODY, checks: "yes" })
+    expect(response.status).toBe(200)
+    expect(mail.mock.calls[0][0].checks).toBeUndefined()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("u1"), '"yes"')
   })
 
   it("never lets an infinite length reach the email (1e999 parses as Infinity)", async () => {

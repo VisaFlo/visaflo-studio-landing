@@ -715,8 +715,15 @@ function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
  */
 export type ReviewNotice = { text: string; partial: boolean }
 
-/** How long after a play press the review waits for playback to get going before saying it hasn't. */
+/** How long after playback is asked for the review waits for it to get going before saying it hasn't. */
 const STALL_MS = 5000
+
+// Why playback hasn't happened since it was asked for: the play() call was
+// refused without the element reporting an error (the button must not look
+// dead), or nothing played within STALL_MS (a file whose header parses and
+// whose data never decodes can fire neither `playing` nor `error`). Transient
+// and local; the persisted per-take verdict is `checks.playable`.
+type PlaybackProblem = "refused" | "stalled" | null
 
 export function ReviewStep({
   recording,
@@ -743,15 +750,10 @@ export function ReviewStep({
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
-  // A play() that was refused without the element reporting an error: the
-  // button must not look dead.
-  const [playRefused, setPlayRefused] = useState(false)
-  // Playback was asked for but never got going (a file whose header parses
-  // and whose data never decodes fires neither `playing` nor `error`): the
-  // person gets a word, the take is not flagged, since nothing was reported.
-  const [stalled, setStalled] = useState(false)
+  const [problem, setProblem] = useState<PlaybackProblem>(null)
   const stallTimer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(stallTimer.current), [])
+  const clearStall = () => window.clearTimeout(stallTimer.current)
+  useEffect(() => clearStall, [])
   const checks = recording.checks
   // The flow records the player's "no" in the take's checks (and keeps it),
   // so the take itself says whether it played.
@@ -760,22 +762,38 @@ export function ReviewStep({
   // A check that never ran isn't a complaint; a recovered take's placeholders
   // aren't readings.
   const allGood = !unplayable && (checks.recovered || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
+  // What to say over the player: the file's verdict beats a per-press
+  // symptom; a stall beats a refusal (it means the press was accepted); a
+  // refusal is shown only while the custom button is up.
+  const overlay = unplayable ? "unplayable" : problem === "stalled" ? "stalled" : problem === "refused" && !playing ? "refused" : null
 
   function play() {
-    setPlayRefused(false)
+    setProblem((p) => (p === "refused" ? null : p))
     void player.current?.play().catch((error: unknown) => {
       console.warn("Playback didn't start", error)
       // NotSupportedError is the file, and sticks; anything else (an abort
       // from a remount racing the press) is worth another try.
       if ((error as { name?: string } | null)?.name === "NotSupportedError") onPlayable(false)
-      else setPlayRefused(true)
+      else setProblem("refused")
     })
   }
 
+  // Nothing played within STALL_MS: a word for the person, a trace for us,
+  // and no flag on the take, since nothing was reported.
+  function stalled() {
+    const el = player.current
+    console.warn(`The review player hasn't started playing within ${STALL_MS} ms`, {
+      mime: recording.mime,
+      readyState: el?.readyState,
+      networkState: el?.networkState,
+      currentTime: el?.currentTime,
+    })
+    setProblem("stalled")
+  }
+
   function startedPlaying() {
-    window.clearTimeout(stallTimer.current)
-    setStalled(false)
-    setPlayRefused(false)
+    clearStall()
+    setProblem(null)
     onPlayable(true)
   }
 
@@ -790,35 +808,32 @@ export function ReviewStep({
           controls={playing}
           onPlay={() => {
             setPlaying(true)
-            // If nothing plays within a few seconds, say so (see `stalled`).
-            window.clearTimeout(stallTimer.current)
-            stallTimer.current = window.setTimeout(() => setStalled(true), STALL_MS)
+            // If nothing plays within a few seconds, say so (see PlaybackProblem).
+            clearStall()
+            stallTimer.current = window.setTimeout(stalled, STALL_MS)
           }}
           // `playing`, not `play`: `play` fires on the press; `playing` only
           // once the browser has decoded enough to advance.
           onPlaying={startedPlaying}
+          // A pause before playback got going isn't a stall.
+          onPause={clearStall}
           onError={(event) => {
             console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
-            window.clearTimeout(stallTimer.current)
+            clearStall()
             onPlayable(false)
           }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
-        {unplayable ? (
+        {overlay && (
           <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            {notice?.partial
-              ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
-              : "This recording looks damaged and may not play for us either. We recommend recording again."}
+            {overlay === "unplayable"
+              ? notice?.partial
+                ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
+                : "This recording looks damaged and may not play for us either. We recommend recording again."
+              : overlay === "stalled"
+                ? "This recording isn't playing. You can still submit it; recording again is safer."
+                : "Playback didn't start. Try again."}
           </p>
-        ) : stalled ? (
-          <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            This recording isn&apos;t playing. You can still submit it; recording again is safer.
-          </p>
-        ) : (
-          !playing &&
-          playRefused && (
-            <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">Playback didn&apos;t start. Try again.</p>
-          )
         )}
         {!playing && (
           <button

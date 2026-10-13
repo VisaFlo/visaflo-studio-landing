@@ -21,7 +21,11 @@ export type StudioRequestMail = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: "camera"
-  /** Absent when the browser sent none (usually a take recovered after the page closed mid-recording). */
+  /**
+   * Absent when the body carried no checks object: an older page build, or a
+   * request not sent by /start (a current client always sends one,
+   * RECOVERED_CHECKS for a recovered take).
+   */
   checks?: RecordingChecks
   consentAt: string
 }
@@ -35,7 +39,7 @@ function minutes(seconds: number): string {
 export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<void> {
   const folder = entry.recordingPath.slice(0, entry.recordingPath.lastIndexOf("/"))
   const folderUrl = consoleUrl(folder)
-  const checks = entry.checks ? describeChecks(entry.checks) : "no checks sent (usually a take recovered after the page closed mid-recording)"
+  const checks = entry.checks ? describeChecks(entry.checks) : "no checks sent (older page build or a malformed request)"
   const email = entry.email
     ? entry.emailVerified
       ? entry.email

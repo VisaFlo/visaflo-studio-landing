@@ -47,9 +47,10 @@ describe("sendStudioRequestEmail", () => {
     expect(sent().text).toContain("face seen, voice heard, REVIEW COULDN'T PLAY IT")
   })
 
-  it("says when no checks were sent, without asserting why, and when the length is unknown", async () => {
+  it("says when no checks were sent (an older page build), and when the length is unknown", async () => {
     await sendStudioRequestEmail({ ...ENTRY, checks: undefined, recordingSeconds: 0 })
-    expect(sent().text).toContain("length unknown (camera), no checks sent")
+    expect(sent().text).toContain("length unknown (camera), no checks sent (older page build or a malformed request)")
+    expect(sent().text).not.toContain("recovered")
     expect(sent().text).not.toContain("0:00")
   })
 
