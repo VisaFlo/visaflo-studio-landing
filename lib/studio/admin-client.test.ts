@@ -1,0 +1,87 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { adminRequest } from "@/lib/studio/admin-client"
+
+type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+const user = (token = "tok") => ({ getIdToken: vi.fn(async () => token) })
+const pick = (body: Record<string, unknown>) => (Array.isArray(body.items) ? (body.items as string[]) : undefined)
+const reply = (body: BodyInit | null, status = 200, type = "application/json") => {
+  const fetch = vi.fn<Fetch>(async () => new Response(body, { status, headers: { "content-type": type } }))
+  vi.stubGlobal("fetch", fetch)
+  return fetch
+}
+
+describe("adminRequest", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it("sends the token as Bearer", async () => {
+    const fetch = reply(JSON.stringify({ items: ["a"] }))
+    expect(await adminRequest(user("the-token"), "/api/admin/submissions", pick)).toEqual({ status: "ready", data: ["a"] })
+    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: "Bearer the-token" } })
+  })
+
+  it("shows a non-master the gate's own message", async () => {
+    reply(JSON.stringify({ error: "This page is only for VisaFlo master accounts." }), 403)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "This page is only for VisaFlo master accounts.",
+    })
+  })
+
+  it("surfaces the server's own error, else the status, and logs a body that isn't JSON", async () => {
+    reply(JSON.stringify({ error: "Storage refused the read." }), 502)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({ status: "error", message: "Storage refused the read." })
+    expect(console.error).not.toHaveBeenCalled()
+
+    reply("<html>Gateway timeout</html>", 504, "text/html")
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "Request failed (504). Reload to try again.",
+    })
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("/api/admin/submissions"), 504, expect.stringContaining("Gateway timeout"))
+  })
+
+  it("logs a failure whose error isn't a string, and doesn't crash on a null body", async () => {
+    reply(JSON.stringify({ error: { code: "FUNCTION_INVOCATION_TIMEOUT" } }), 504)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "Request failed (504). Reload to try again.",
+    })
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("without a usable error message"), 504, expect.stringContaining("FUNCTION_INVOCATION_TIMEOUT"))
+
+    reply("null", 500)
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "Request failed (500). Reload to try again.",
+    })
+  })
+
+  it("treats a 200 with the wrong shape as an error, and logs the body so it can be looked at", async () => {
+    reply(JSON.stringify({ nope: 1 }))
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "The server answered in a form this page doesn't understand. Reload to try again.",
+    })
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("unexpected body"), expect.stringContaining("nope"))
+  })
+
+  it("maps a dropped connection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch")
+      }),
+    )
+    expect(await adminRequest(user(), "/api/admin/submissions", pick)).toEqual({
+      status: "error",
+      message: "No connection. Check your internet, then reload.",
+    })
+  })
+})

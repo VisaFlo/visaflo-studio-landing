@@ -3,17 +3,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Camera, CameraOff, Mic, Play, Square, Sun, TriangleAlert } from "lucide-react"
 
-import { CameraVideo, FaceRing } from "@/components/studio/face-ring"
+import { CameraVideo, PortraitFrame } from "@/components/studio/camera-frame"
 import { DoneMark, FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
 import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
-import { checkAlignment, RING_TICKS, ticksForPose, type AlignCheck } from "@/lib/studio/face-tracker"
+import type { Check } from "@/lib/studio/checks"
+import { checkAlignment, type AlignCheck, type FaceFrame } from "@/lib/studio/face-tracker"
 import type { Recording } from "@/lib/studio/recorder"
 import { startRecognizer, speechRecognitionSupported } from "@/lib/studio/speech-recognizer"
 import { useFaceFrames } from "@/lib/studio/use-face-frames"
 import { advancePointer, indexScript, lineOfWord, tokenize } from "@/lib/studio/word-follow"
 import { cn } from "@/lib/utils"
-
-export type Pose = { yaw: number; pitch: number }
 
 // Camera steps: the preview takes the big left area on desktop and sits
 // between the title and the controls on a phone.
@@ -27,12 +26,12 @@ function StageLayout({ title, stage, children }: { title: ReactNode; stage: Reac
   )
 }
 
-const CAPTURE_STEPS = ["Fit your face", "Turn your head", "Read the script"]
+const CAPTURE_STEPS = ["Fit your face", "Read the script"]
 
-// The three parts of the recording, named, so it's clear what comes next.
-export function CaptureStepper({ current, progress = 0 }: { current: number; progress?: number }) {
+// The two parts of the recording, named, so it's clear what comes next.
+export function CaptureStepper({ current, progress = 0 }: { current: 0 | 1; progress?: number }) {
   return (
-    <ol className="m-0 grid list-none grid-cols-3 gap-1 p-0" aria-label="Recording steps">
+    <ol className="m-0 grid list-none grid-cols-2 gap-1 p-0" aria-label="Recording steps">
       {CAPTURE_STEPS.map((label, i) => (
         <li key={label} aria-current={i === current ? "step" : undefined} className="flex flex-col gap-2">
           <span className="relative h-1 overflow-hidden bg-stone-200">
@@ -56,9 +55,9 @@ export function CaptureStepper({ current, progress = 0 }: { current: number; pro
   )
 }
 
-function RingStage({ children }: { children: ReactNode }) {
+function PreviewStage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[560px]">{children}</div>
+    <div className="relative flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[620px]">{children}</div>
   )
 }
 
@@ -86,7 +85,7 @@ export function CameraAllowStep({
         </>
       }
       stage={
-        <div className="flex aspect-[16/10] max-h-[560px] w-full items-center justify-center gap-6 border-[1.5px] border-dashed border-stone-400 bg-stone-50">
+        <div className="flex aspect-[9/16] h-[min(560px,60vh)] flex-col items-center justify-center gap-6 rounded-[28px] border-[1.5px] border-dashed border-stone-400 bg-stone-50">
           <Camera className="size-12 text-stone-600" strokeWidth={1.3} />
           <Mic className="size-11 text-stone-600" strokeWidth={1.3} />
         </div>
@@ -172,7 +171,7 @@ export function CameraBlockedStep({ onRetry }: { onRetry: () => void }) {
         </>
       }
       stage={
-        <div className="flex aspect-[16/10] max-h-[560px] w-full items-center justify-center border border-stone-200 bg-stone-100">
+        <div className="flex aspect-[9/16] h-[min(560px,60vh)] items-center justify-center rounded-[28px] border border-stone-200 bg-stone-100">
           <CameraOff className="size-14 text-stone-400" strokeWidth={1.3} />
         </div>
       }
@@ -212,12 +211,39 @@ function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint
 
 const COUNTDOWN_SECONDS = 3
 
-export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (baseline: Pose) => void }) {
+// Keeps the face detector running, off-screen, while the script is read, so
+// the review and the team can tell whether a face was in the camera's view
+// while recording. It is a found/not-found tally on the raw camera frame
+// (wider than the recorded crop on a laptop), not the oval check. The flow
+// tallies the readings; with fewer than FACE_MIN_FRAMES of them the framing
+// step's own reading stands (checks.ts).
+export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (frame: FaceFrame) => void }) {
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null)
+  useFaceFrames(video, onFrame)
+  return <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
+}
+
+// `stream` is the vertical crop the person sees and records; `camera` is the
+// raw camera it was cut from. The face check reads the raw camera, not
+// `stream`: MediaPipe's detectForVideo threw on the canvas-captured stream
+// (Chrome on macOS, @mediapipe/tasks-vision 1.1; see commit c5270eb). If a
+// later version accepts it, this indirection can go. readFace measures
+// inside the same 9:16 crop, so the oval check matches the preview.
+export function AlignStep({
+  stream,
+  camera,
+  onStart,
+}: {
+  stream: MediaStream
+  camera: MediaStream
+  /** faceSeen is null when the tracker never ran, so nothing is claimed. */
+  onStart: (result: { faceSeen: Check }) => void
+}) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
   const [canSkip, setCanSkip] = useState(false)
-  const poses = useRef<Pose[]>([])
+  const faceSeen = useRef(false)
   const allOkSince = useRef<number | null>(null)
   const faceOkSince = useRef<number | null>(null)
   const readySince = useRef<number | null>(null)
@@ -229,11 +255,8 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
     const result = checkAlignment(frame)
     setCheck(result)
     const now = performance.now()
-    if (frame.found) {
-      poses.current.push({ yaw: frame.yaw, pitch: frame.pitch })
-      if (poses.current.length > 15) poses.current.shift()
-    }
-    const faceOk = Boolean(result?.inCircle && result.distance === "ok")
+    if (frame.found) faceSeen.current = true
+    const faceOk = Boolean(result?.inFrame && result.distance === "ok")
     faceOkSince.current = faceOk ? (faceOkSince.current ?? now) : null
     allOkSince.current = faceOk && result?.light ? (allOkSince.current ?? now) : null
     // A dim room shouldn't stop anyone: after 8 seconds framed well, light
@@ -264,19 +287,20 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
 
   const unavailable = status === "unavailable"
   const live = status === "ready"
-  const aligned = Boolean(check?.inCircle && check.distance === "ok")
+  const aligned = Boolean(check?.inFrame && check.distance === "ok")
 
   function start() {
     if (started.current) return
     started.current = true
-    const list = poses.current
-    const baseline = list.length
-      ? {
-          yaw: list.reduce((s, p) => s + p.yaw, 0) / list.length,
-          pitch: list.reduce((s, p) => s + p.pitch, 0) / list.length,
-        }
-      : { yaw: 0, pitch: 0 }
-    onStart(baseline)
+    try {
+      // Without live tracking there is no reading: "not checked", not "seen".
+      onStart({ faceSeen: status === "ready" ? faceSeen.current : null })
+    } catch (error) {
+      // Defensive: the flow's onStart handles its own failures today, but if
+      // it ever throws, the button must work again rather than stay dead.
+      started.current = false
+      throw error
+    }
   }
 
   useEffect(() => {
@@ -288,17 +312,18 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       title={
         <>
           <CaptureStepper current={0} />
-          <FlowTitle>Fit your face in the circle</FlowTitle>
+          <FlowTitle>Fit your face in the oval</FlowTitle>
           <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
             {unavailable
-              ? "Sit about an arm's length away, facing a window or lamp. Press the button when you're centered."
-              : "Sit about an arm's length away. When all three are checked, the head turn starts on its own."}
+              ? "This vertical frame is what your video will use. Hold your phone upright, or sit an arm's length from your laptop, facing a window or lamp. Press the button when you're in the oval."
+              : "This vertical frame is what your video will use. Sit an arm's length away. When all three are checked, recording starts on its own."}
           </p>
         </>
       }
       stage={
-        <RingStage>
-          <FaceRing stream={stream} onVideo={setVideo} dim={live && !aligned && countdown === null}>
+        <PreviewStage>
+          <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
+          <PortraitFrame stream={stream} dim={live && !aligned && countdown === null}>
             {countdown !== null && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white" aria-hidden>
                 <span className="font-serif text-[96px] leading-none font-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]">
@@ -307,13 +332,13 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
                 <span className="bg-stone-950/60 px-3 py-1 text-[14px]">Hold still</span>
               </div>
             )}
-          </FaceRing>
-        </RingStage>
+          </PortraitFrame>
+        </PreviewStage>
       }
     >
       {!unavailable && (
         <ul className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
-          <CheckRow label="Face in circle" ok={live ? Boolean(check?.inCircle) : null} hint="Center your face" />
+          <CheckRow label="Face in the oval" ok={live ? Boolean(check?.inFrame) : null} hint="Center your face" />
           <CheckRow
             label="Distance"
             ok={live ? check?.distance === "ok" : null}
@@ -333,7 +358,7 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
       )}
       <p role="status" className="m-0 text-[14px] text-stone-600">
         {countdown !== null
-          ? `Starting the head turn in ${countdown}…`
+          ? `Recording starts in ${countdown}…`
           : live
             ? aligned
               ? "Almost there. Find a bit more light."
@@ -346,7 +371,7 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
         <div className="flex flex-col gap-2">
           {unavailable ? (
             <PrimaryButton type="button" onClick={start}>
-              I&apos;m centered, start
+              I&apos;m in the oval, start
             </PrimaryButton>
           ) : (
             <QuietButton type="button" onClick={start}>
@@ -355,129 +380,6 @@ export function AlignStep({ stream, onStart }: { stream: MediaStream; onStart: (
           )}
         </div>
       )}
-    </StageLayout>
-  )
-}
-
-export function TurnStep({
-  stream,
-  baseline,
-  onDone,
-  onStartOver,
-}: {
-  stream: MediaStream
-  baseline: Pose
-  onDone: (result: { headTurn: boolean; faceSeen: boolean }) => void
-  onStartOver: () => void
-}) {
-  const [video, setVideo] = useState<HTMLVideoElement | null>(null)
-  const [ticks, setTicks] = useState<Set<number>>(() => new Set())
-  const [canSkip, setCanSkip] = useState(false)
-  const faceSeen = useRef(false)
-  const doneRef = useRef(onDone)
-  useEffect(() => {
-    doneRef.current = onDone
-  })
-
-  const status = useFaceFrames(video, (frame) => {
-    if (!frame.found) return
-    faceSeen.current = true
-    const hit = ticksForPose(frame.yaw - baseline.yaw, frame.pitch - baseline.pitch)
-    if (!hit.length) return
-    setTicks((prev) => {
-      if (hit.every((t) => prev.has(t))) return prev
-      const next = new Set(prev)
-      hit.forEach((t) => next.add(t))
-      return next
-    })
-  })
-
-  // Without live tracking, fill the ring over 12 seconds so the person still
-  // has a pace to follow; the recording captures the turn either way.
-  useEffect(() => {
-    if (status !== "unavailable") return
-    const start = performance.now()
-    const id = window.setInterval(() => {
-      const n = Math.min(RING_TICKS, Math.round(((performance.now() - start) / 12_000) * RING_TICKS))
-      setTicks(new Set(Array.from({ length: n }, (_, i) => i)))
-    }, 100)
-    return () => window.clearInterval(id)
-  }, [status])
-
-  // If tracking struggles (glasses, odd light), let them move on after 30s.
-  useEffect(() => {
-    const id = window.setTimeout(() => setCanSkip(true), 30_000)
-    return () => window.clearTimeout(id)
-  }, [])
-
-  const progress = ticks.size / RING_TICKS
-  const complete = progress >= 0.8
-
-  // Full ring: show the success state for a beat, then go to the script.
-  useEffect(() => {
-    if (!complete) return
-    const id = window.setTimeout(
-      () => doneRef.current({ headTurn: true, faceSeen: faceSeen.current || status !== "ready" }),
-      1200,
-    )
-    return () => window.clearTimeout(id)
-  }, [complete, status])
-
-  return (
-    <StageLayout
-      title={
-        <>
-          <CaptureStepper current={1} progress={progress} />
-          <FlowTitle>{complete ? "Got it" : "Slowly turn your head in a circle"}</FlowTitle>
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            {complete
-              ? "Next, read a short script out loud."
-              : "Like drawing a circle with your nose. Follow the dot and fill the whole ring."}
-          </p>
-        </>
-      }
-      stage={
-        <RingStage>
-          <FaceRing stream={stream} onVideo={setVideo} done={ticks}>
-            {!complete && (
-              <div className="pointer-events-none absolute inset-0 animate-spin [animation-duration:7s]" aria-hidden>
-                <span className="absolute top-[1.2%] left-1/2 size-4 -translate-x-1/2 rounded-full bg-[#4d5a48] ring-4 ring-white" />
-              </div>
-            )}
-            <span className="absolute top-[9%] left-1/2 flex h-7 -translate-x-1/2 items-center gap-2 bg-stone-950/72 px-2.5 font-mono text-[12px] text-white">
-              <span className="size-2 animate-pulse rounded-full bg-red-500" />
-              Recording
-            </span>
-            {complete && (
-              <span className="absolute inset-0 flex items-center justify-center" aria-hidden>
-                <span className="flex size-20 items-center justify-center rounded-full bg-white/92">
-                  <DoneMark className="size-10" />
-                </span>
-              </span>
-            )}
-          </FaceRing>
-        </RingStage>
-      }
-    >
-      <div className="flex items-baseline gap-3">
-        <p role="status" className="m-0 font-mono text-[24px]">
-          {Math.round(progress * 100)}%
-        </p>
-        <span className="text-[14px] text-stone-600">{complete ? "Done" : "of the ring filled"}</span>
-      </div>
-      <div className="flex flex-col gap-2">
-        {canSkip && !complete && (
-          <PrimaryButton
-            type="button"
-            onClick={() => onDone({ headTurn: false, faceSeen: faceSeen.current || status !== "ready" })}
-          >
-            Skip to the script
-          </PrimaryButton>
-        )}
-        <QuietButton type="button" onClick={onStartOver}>
-          Start over
-        </QuietButton>
-      </div>
     </StageLayout>
   )
 }
@@ -716,7 +618,7 @@ export function ScriptStep({
 
   return (
     <main className="mx-auto flex w-full max-w-[960px] flex-grow flex-col gap-6 px-(--page-pad) py-6 sm:gap-8 sm:py-10">
-      <CaptureStepper current={2} progress={(line + 1) / lines.length} />
+      <CaptureStepper current={1} progress={(line + 1) / lines.length} />
       <div className="order-2 flex flex-col gap-5 sm:order-1">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[14px] text-stone-600">
           <span className="flex items-center gap-2">
@@ -762,7 +664,7 @@ export function ScriptStep({
         </p>
       </div>
       <div className="order-1 flex flex-wrap items-center justify-between gap-4 border-stone-200 sm:order-2 sm:mt-auto sm:gap-6 sm:border-t sm:pt-6">
-        <div className="relative aspect-[16/10] w-[min(240px,40vw)] overflow-hidden bg-stone-700 sm:w-[288px]">
+        <div className="relative aspect-[9/16] h-[min(220px,32vh)] overflow-hidden rounded-xl bg-stone-700">
           <CameraVideo stream={stream} className="size-full object-cover" />
           <span className="absolute top-2 left-2 flex h-6 items-center gap-2 bg-stone-950/72 px-2 font-mono text-[12px] text-white">
             <span className="size-2 animate-pulse rounded-full bg-red-500" />
@@ -790,19 +692,38 @@ export function ScriptStep({
   )
 }
 
-function Chip({ ok, children }: { ok: boolean; children: ReactNode }) {
+// A Check as a chip: passed, failed, or never checked (shown neutrally).
+function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
   return (
     <li
       className={cn(
         "flex h-8 items-center gap-2 px-3 text-[14px]",
-        ok ? "bg-[#eef0e9] text-[#3a4536]" : "bg-orange-50 text-[#c2410c]",
+        ok === true ? "bg-[#eef0e9] text-[#3a4536]" : ok === false ? "bg-orange-50 text-[#c2410c]" : "bg-stone-100 text-stone-600",
       )}
     >
-      {ok ? <DoneMark className="size-3.5 stroke-[#3a4536]" /> : <TriangleAlert className="size-3.5" aria-hidden />}
+      {ok === true && <DoneMark className="size-3.5 stroke-[#3a4536]" />}
+      {ok === false && <TriangleAlert className="size-3.5" aria-hidden />}
       {children}
     </li>
   )
 }
+
+/**
+ * A word about the take on review (recovered after a reload, or cut off), and
+ * whether it is only part of what was recorded, which decides what an
+ * unplayable file is taken to mean.
+ */
+export type ReviewNotice = { text: string; partial: boolean }
+
+/** How long after playback is asked for the review waits for it to get going before saying it hasn't. */
+const STALL_MS = 5000
+
+// Why playback hasn't happened since it was asked for: the play() call was
+// refused without the element reporting an error (the button must not look
+// dead), or nothing played within STALL_MS (a file whose header parses and
+// whose data never decodes can fire neither `playing` nor `error`). Transient
+// and local; the persisted per-take verdict is `checks.playable`.
+type PlaybackProblem = "refused" | "stalled" | null
 
 export function ReviewStep({
   recording,
@@ -810,40 +731,115 @@ export function ReviewStep({
   error,
   notice,
   onConsent,
+  onPlayable,
   onSubmit,
   onRedo,
 }: {
   recording: Recording
   consent: boolean
   error?: string | null
-  /** Shown above the checks, e.g. for a take recovered after a reload. */
-  notice?: string | null
+  notice?: ReviewNotice | null
   onConsent: (value: boolean) => void
+  /**
+   * Whether this browser could play the take back (true once playback really
+   * runs, false on a load or decode error); the flow keeps it with the checks.
+   */
+  onPlayable: (playable: boolean) => void
   onSubmit: () => void
   onRedo: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
+  const [problem, setProblem] = useState<PlaybackProblem>(null)
+  const stallTimer = useRef<number | undefined>(undefined)
+  const clearStall = () => window.clearTimeout(stallTimer.current)
+  useEffect(() => clearStall, [])
   const checks = recording.checks
-  const short = recording.source === "camera" && recording.seconds < 45
-  const allGood = !checks || (checks.faceSeen && checks.voiceHeard && checks.headTurn && !short)
+  // The flow records the player's "no" in the take's checks (and keeps it),
+  // so the take itself says whether it played.
+  const unplayable = checks.playable === false
+  const short = recording.seconds < 45
+  // A check that never ran isn't a complaint; a recovered take's placeholders
+  // aren't readings.
+  const allGood = !unplayable && (checks.recovered || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
+  // What to say over the player: the file's verdict beats a per-press
+  // symptom; a stall beats a refusal (it means the press was accepted); a
+  // refusal is shown only while the custom button is up.
+  const overlay = unplayable ? "unplayable" : problem === "stalled" ? "stalled" : problem === "refused" && !playing ? "refused" : null
+
+  function play() {
+    setProblem((p) => (p === "refused" ? null : p))
+    void player.current?.play().catch((error: unknown) => {
+      console.warn("Playback didn't start", error)
+      // NotSupportedError is the file, and sticks; anything else (an abort
+      // from a remount racing the press) is worth another try.
+      if ((error as { name?: string } | null)?.name === "NotSupportedError") onPlayable(false)
+      else setProblem("refused")
+    })
+  }
+
+  // Nothing played within STALL_MS: a word for the person, a trace for us,
+  // and no flag on the take, since nothing was reported.
+  function stalled() {
+    const el = player.current
+    console.warn(`The review player hasn't started playing within ${STALL_MS} ms`, {
+      mime: recording.mime,
+      readyState: el?.readyState,
+      networkState: el?.networkState,
+      currentTime: el?.currentTime,
+    })
+    setProblem("stalled")
+  }
+
+  function startedPlaying() {
+    clearStall()
+    setProblem(null)
+    onPlayable(true)
+  }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
-      <div className="relative aspect-[16/10] max-h-[560px] min-w-0 flex-[999_1_560px] overflow-hidden bg-stone-700">
+    <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
+      <div className="relative aspect-[9/16] h-[min(640px,70vh)] shrink-0 overflow-hidden rounded-[28px] bg-stone-700">
         <video
+          key={recording.url}
           ref={player}
           src={recording.url}
           playsInline
           controls={playing}
-          onPlay={() => setPlaying(true)}
-          className={cn("size-full object-cover", recording.source === "camera" && !playing && "-scale-x-100")}
+          onPlay={() => {
+            setPlaying(true)
+            // If nothing plays within a few seconds, say so (see PlaybackProblem).
+            clearStall()
+            stallTimer.current = window.setTimeout(stalled, STALL_MS)
+          }}
+          // `playing`, not `play`: `play` fires on the press; `playing` only
+          // once the browser has decoded enough to advance.
+          onPlaying={startedPlaying}
+          // A pause before playback got going isn't a stall.
+          onPause={clearStall}
+          onError={(event) => {
+            console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
+            clearStall()
+            onPlayable(false)
+          }}
+          className={cn("size-full object-cover", !playing && "-scale-x-100")}
         />
+        {overlay && (
+          <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
+            {overlay === "unplayable"
+              ? notice?.partial
+                ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
+                : "This recording looks damaged and may not play for us either. We recommend recording again."
+              : overlay === "stalled"
+                ? "This recording isn't playing. You can still submit it; recording again is safer."
+                : "Playback didn't start. Try again."}
+          </p>
+        )}
         {!playing && (
           <button
             type="button"
             aria-label="Play recording"
-            onClick={() => void player.current?.play()}
+            onClick={play}
             className="absolute top-1/2 left-1/2 flex size-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/92"
           >
             <Play className="size-7 translate-x-0.5 fill-stone-950 text-stone-950" aria-hidden />
@@ -860,20 +856,20 @@ export function ReviewStep({
         {notice && (
           <p className="m-0 flex items-start gap-2 bg-stone-50 p-3 text-[14px] leading-[1.5] text-stone-700">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-[#c2410c]" aria-hidden />
-            {notice}
+            {notice.text}
           </p>
         )}
-        {checks ? (
+        {/* A recovered take's two readings are placeholders, not results. */}
+        {!checks.recovered && (
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-            <Chip ok={checks.faceSeen}>{checks.faceSeen ? "Face clear" : "Face not seen"}</Chip>
-            <Chip ok={checks.voiceHeard}>{checks.voiceHeard ? "Voice clear" : "No voice heard"}</Chip>
-            <Chip ok={checks.headTurn}>{checks.headTurn ? "Head turn" : "Head turn skipped"}</Chip>
+            <Chip ok={checks.faceSeen}>
+              {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}
+            </Chip>
+            <Chip ok={checks.voiceHeard}>
+              {checks.voiceHeard === true ? "Voice clear" : checks.voiceHeard === false ? "No voice heard" : "Voice not checked"}
+            </Chip>
             {short && <Chip ok={false}>Short. Aim for a minute</Chip>}
           </ul>
-        ) : notice ? null : (
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            Use a clip where you face the camera and talk for about a minute in a quiet room.
-          </p>
         )}
         <label
           className={cn(

@@ -3,6 +3,7 @@
 import type { User } from "firebase/auth"
 import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebase/storage"
 
+import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
 import { extensionFor, type Recording } from "@/lib/studio/recorder"
 
@@ -55,7 +56,7 @@ export type SampleRequest = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: Recording["source"]
-  checks?: Recording["checks"]
+  checks: Recording["checks"]
   name: string
   firm: string
   topicId: string
@@ -79,10 +80,7 @@ export async function submitSampleRequest(user: User, request: SampleRequest): P
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${await user.getIdToken()}` },
     body: JSON.stringify(request),
   })
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(body.error ?? `Request failed (${response.status})`)
-  }
+  if (!response.ok) throw apiError("/api/studio/requests", response.status, await response.text())
 }
 
 const doneKey = (uid: string) => `vf_studio_request:${uid}`

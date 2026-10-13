@@ -1,11 +1,10 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
-import { bearerToken, verifyIdToken } from "@/lib/studio/verify-id-token"
+import { isPlainObject, parseChecks } from "@/lib/studio/checks"
+import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
+import { identifier, isoDate, LIMITS, seconds, text } from "@/lib/studio/request-json"
+import { bearerToken, verifyFailure, verifyIdToken } from "@/lib/studio/verify-id-token"
 
-const MAX_TEXT = 200
-
-function text(value: unknown, max = MAX_TEXT): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : ""
-}
+const RECORDING_FILE = new RegExp(`^recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
 
 // A signed-in person finished recording and picked a topic. The files are
 // already in the bucket; this tells the team. The uid comes from the verified
@@ -17,54 +16,65 @@ export async function POST(request: Request) {
   let user
   try {
     user = await verifyIdToken(token)
-  } catch {
-    return Response.json({ error: "Your sign-in expired. Sign in again, then retry." }, { status: 401 })
+  } catch (error) {
+    const failure = verifyFailure(error)
+    if (failure.kind !== "expired") console.error("verifyIdToken failed", error)
+    return Response.json({ error: failure.message }, { status: failure.status })
   }
 
-  let body: Record<string, unknown>
+  let parsed: unknown
   try {
-    body = (await request.json()) as Record<string, unknown>
-  } catch {
+    parsed = await request.json()
+  } catch (error) {
+    console.error(`Unreadable request body from ${user.uid}`, error)
     return Response.json({ error: "Invalid request body." }, { status: 400 })
   }
+  if (!isPlainObject(parsed)) {
+    console.error(`Request body from ${user.uid} isn't an object`, JSON.stringify(parsed)?.slice(0, 300))
+    return Response.json({ error: "Invalid request body." }, { status: 400 })
+  }
+  const body = parsed
 
-  const submissionId = text(body.submissionId, 64)
-  const recordingPath = text(body.recordingPath, 300)
+  const submissionId = identifier(body.submissionId, LIMITS.submissionId) ?? ""
+  const recordingPath = identifier(body.recordingPath, LIMITS.recordingPath) ?? ""
   const folder = `studio/${user.uid}/${submissionId}/`
-  const validPath =
-    /^[\w-]+$/.test(submissionId) &&
-    recordingPath.startsWith(folder) &&
-    /^recording\.(mp4|webm|mov|m4v)$/.test(recordingPath.slice(folder.length))
+  const validPath = /^[\w-]+$/.test(submissionId) && recordingPath.startsWith(folder) && RECORDING_FILE.test(recordingPath.slice(folder.length))
   if (!validPath) {
+    // Our own client never sends this, so it is a client bug or someone probing.
+    console.error(`Rejected a recording path from ${user.uid}`, { submissionId: body.submissionId, recordingPath: body.recordingPath })
     return Response.json({ error: "That recording doesn't belong to this account." }, { status: 400 })
   }
-  const topicTitle = text(body.topicTitle, 500)
-  if (!topicTitle) return Response.json({ error: "Pick a topic first." }, { status: 400 })
-  const consentAt = text(body.consentAt, 40)
-  if (!consentAt || Number.isNaN(Date.parse(consentAt))) {
+  // The client sends these only once they are set, so a refusal here is a
+  // client bug worth a line too.
+  const topicTitle = text(body.topicTitle, LIMITS.topicTitle)
+  if (!topicTitle) {
+    console.error(`Rejected a request from ${user.uid}: no topic`, { topicTitle: body.topicTitle })
+    return Response.json({ error: "Pick a topic first." }, { status: 400 })
+  }
+  const consentAt = isoDate(body.consentAt)
+  if (!consentAt) {
+    console.error(`Rejected a request from ${user.uid}: bad consent time`, { consentAt: body.consentAt })
     return Response.json({ error: "Agree to the consent first." }, { status: 400 })
   }
 
-  const rawChecks = body.checks as Record<string, unknown> | undefined
+  // This client always sends a checks object; one that doesn't parse is a
+  // client bug worth a line, but not worth losing the request over.
+  const checks = parseChecks(body.checks)
+  if (body.checks !== undefined && !checks) console.error(`Unreadable checks from ${user.uid}`, JSON.stringify(body.checks)?.slice(0, 300))
+
   try {
     await sendStudioRequestEmail({
       uid: user.uid,
-      email: user.email ?? "unknown",
+      email: user.email,
       emailVerified: user.emailVerified,
-      name: text(body.name),
-      firm: text(body.firm),
+      name: text(body.name) ?? "",
+      firm: text(body.firm) ?? "",
       topicTitle,
       submissionId,
       recordingPath,
-      recordingSeconds: Math.max(0, Math.round(Number(body.recordingSeconds) || 0)),
-      recordingSource: body.recordingSource === "upload" ? "upload" : "camera",
-      checks: rawChecks
-        ? {
-            faceSeen: rawChecks.faceSeen === true,
-            voiceHeard: rawChecks.voiceHeard === true,
-            headTurn: rawChecks.headTurn === true,
-          }
-        : undefined,
+      recordingSeconds: seconds(body.recordingSeconds) ?? 0,
+      recordingSource: "camera",
+      checks,
       consentAt,
     })
   } catch (error) {

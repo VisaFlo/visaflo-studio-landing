@@ -5,6 +5,8 @@
 // of reading. One take per account; it's cleared once the request is sent or
 // the person starts over.
 
+import type { RecordingChecks } from "@/lib/studio/checks"
+
 const DB_NAME = "vf-studio"
 const TAKES = "takes"
 const CHUNKS = "chunks"
@@ -13,10 +15,15 @@ export type StoredTake = {
   uid: string
   takeId: string
   mime: string
-  source: "camera" | "upload"
+  source: "camera"
   startedAt: number
-  /** Set when the person pressed Finish (or picked a file); absent if cut off. */
-  finished?: { seconds: number; checks?: { faceSeen: boolean; voiceHeard: boolean; headTurn: boolean } }
+  /**
+   * Set once Finish completed; absent when the page closed mid-recording
+   * (then nothing was measured). `cutOff` is the recorder's verdict that the
+   * take ended early, kept so a reload tells the same story; it is absent
+   * only on takes stored before it existed, read as not cut off.
+   */
+  finished?: { seconds: number; checks: RecordingChecks; cutOff?: boolean }
 }
 
 let opening: Promise<IDBDatabase> | null = null

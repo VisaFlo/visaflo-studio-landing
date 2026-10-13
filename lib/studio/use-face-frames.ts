@@ -28,6 +28,7 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
     const giveUp = window.setTimeout(() => {
       if (cancelled) return
       gaveUp = true
+      console.warn("Face landmarker didn't load within 20 s; continuing without the face check")
       setStatus((s) => (s === "loading" ? "unavailable" : s))
     }, 20_000)
 
@@ -42,21 +43,30 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
           raf = requestAnimationFrame(loop)
           if (t - last < 66 || video.readyState < 2 || !video.videoWidth) return
           last = t
+          let frame: FaceFrame
           try {
-            callback.current(readFace(landmarker, video, t))
+            frame = readFace(landmarker, video, t)
             failures = 0
-          } catch {
+          } catch (error) {
             // A dropped frame is fine; two seconds of them (lost GPU context
-            // after backgrounding, for one) means the tracker is gone.
+            // after backgrounding, for one) means the tracker is gone. The
+            // first one is logged so a real fault isn't invisible.
+            if (failures === 0) console.warn("Face tracking frame failed", error)
             if (++failures >= 30) {
+              console.error("Face tracking gave up after 30 failed frames in a row", error)
               cancelAnimationFrame(raf)
               setStatus("unavailable")
             }
+            return
           }
+          // Outside the try: a fault in the caller is the caller's, not a
+          // tracker failure to be counted and swallowed.
+          callback.current(frame)
         }
         raf = requestAnimationFrame(loop)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        console.error("Face landmarker failed to load", error)
         if (!cancelled) setStatus("unavailable")
       })
 

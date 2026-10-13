@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose"
 
-const PROJECT_ID = "devdashboard-c9159"
+import { PROJECT_ID } from "@/lib/studio/project"
 
 // Firebase ID tokens are JWTs signed by Google's securetoken service, so a
 // public key set is all it takes to check one: no service account here.
@@ -31,6 +31,24 @@ export async function verifyIdToken(token: string): Promise<VerifiedUser> {
     email: typeof payload.email === "string" ? payload.email : undefined,
     emailVerified: payload.email_verified === true,
   }
+}
+
+// What a failed verifyIdToken was, and what to answer. Only "expired" is the
+// person's to fix by signing in again (and the one kind not worth a log line);
+// "unreachable" means Google's key set couldn't be fetched, which is ours;
+// "invalid" (bad signature, wrong project) is a token to discard.
+export type VerifyFailure =
+  | { kind: "expired"; status: 401; message: string }
+  | { kind: "unreachable"; status: 503; message: string }
+  | { kind: "invalid"; status: 401; message: string }
+
+export function verifyFailure(error: unknown): VerifyFailure {
+  const code = (error as { code?: unknown } | null)?.code
+  if (code === "ERR_JWT_EXPIRED") return { kind: "expired", status: 401, message: "Your sign-in expired. Sign in again, then retry." }
+  if ((typeof code === "string" && code.startsWith("ERR_JWKS")) || error instanceof TypeError) {
+    return { kind: "unreachable", status: 503, message: "We couldn't verify your sign-in right now. Try again in a minute." }
+  }
+  return { kind: "invalid", status: 401, message: "We couldn't verify your sign-in. Sign out and sign in again." }
 }
 
 export function bearerToken(request: Request): string | null {
