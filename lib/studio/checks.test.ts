@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { checkFlags, describeChecks, FACE_MIN_FRAMES, faceVerdict, markPlayable, parseChecks } from "@/lib/studio/checks"
+import { checkFlags, describeChecks, FACE_MIN_FRAMES, faceVerdict, markPlayable, parseChecks, RECOVERED_CHECKS } from "@/lib/studio/checks"
 
 describe("parseChecks", () => {
   it("keeps true, false and null (not checked) and drops anything else", () => {
@@ -23,13 +23,15 @@ describe("parseChecks: the review's playback result and the recovered marker", (
     expect(parseChecks({ faceSeen: true, voiceHeard: true, playable: null })).toStrictEqual({ faceSeen: true, voiceHeard: true })
     expect(parseChecks({ faceSeen: true, voiceHeard: true })).toStrictEqual({ faceSeen: true, voiceHeard: true })
   })
-  it("keeps the recovered marker only as the literal true", () => {
+  it("keeps the recovered marker only as the literal true, and makes the readings placeholders when it is set", () => {
     expect(parseChecks({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toStrictEqual({
       faceSeen: null,
       voiceHeard: null,
       recovered: true,
       playable: false,
     })
+    // Readings next to the marker can't be real; they are not carried.
+    expect(parseChecks({ faceSeen: true, voiceHeard: false, recovered: true })).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true })
     expect(parseChecks({ faceSeen: null, voiceHeard: null, recovered: "yes" })).toStrictEqual({ faceSeen: null, voiceHeard: null })
   })
 })
@@ -46,9 +48,10 @@ describe("markPlayable", () => {
     const checks = { ...measured, playable: true }
     expect(markPlayable(checks, true)).toBe(checks)
   })
-  it("doesn't invent measurements for a take that has none, except to record, marked as recovered, that it wouldn't play", () => {
-    expect(markPlayable(undefined, true)).toBeUndefined()
-    expect(markPlayable(undefined, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })
+  it("keeps a recovered take's placeholders and marker around the verdict, without touching the shared constant", () => {
+    expect(markPlayable(RECOVERED_CHECKS, false)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })
+    expect(markPlayable(RECOVERED_CHECKS, true)).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true, playable: true })
+    expect(RECOVERED_CHECKS).toStrictEqual({ faceSeen: null, voiceHeard: null, recovered: true })
   })
 })
 
@@ -67,8 +70,10 @@ describe("checkFlags", () => {
   it("says so when a finished request carries no checks at all, so it can't pass for a clean take", () => {
     expect(checkFlags(undefined)).toEqual(["Checks not recorded"])
   })
-  it("says the same for a recovered take whose only reading is that it wouldn't play, not that the checks didn't run", () => {
-    expect(checkFlags({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toEqual(["Checks not recorded", "Review couldn't play it"])
+  it("says the same for a recovered take, with or without a playback verdict, never that the checks didn't run", () => {
+    expect(checkFlags(RECOVERED_CHECKS)).toEqual(["Checks not recorded"])
+    expect(checkFlags({ ...RECOVERED_CHECKS, playable: true })).toEqual(["Checks not recorded"])
+    expect(checkFlags({ ...RECOVERED_CHECKS, playable: false })).toEqual(["Checks not recorded", "Review couldn't play it"])
   })
 })
 
@@ -81,7 +86,8 @@ describe("describeChecks", () => {
     expect(describeChecks({ faceSeen: true, voiceHeard: true, playable: true })).toBe("face seen, voice heard")
   })
   it("tells a recovered take from one whose checks failed to run", () => {
-    expect(describeChecks({ faceSeen: null, voiceHeard: null, recovered: true, playable: false })).toBe(
+    expect(describeChecks(RECOVERED_CHECKS)).toBe("no checks saved (take recovered after the page closed mid-recording)")
+    expect(describeChecks({ ...RECOVERED_CHECKS, playable: false })).toBe(
       "no checks saved (take recovered after the page closed mid-recording), REVIEW COULDN'T PLAY IT",
     )
   })

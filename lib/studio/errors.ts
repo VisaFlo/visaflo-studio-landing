@@ -5,8 +5,8 @@ import { isPlainObject } from "@/lib/studio/checks"
 // never shown. (Apart from an ApiError, whose message is ours, a code-less
 // Error's message is shown only on the admin pages, by describeLoadError,
 // never on /start.) A fetch that never reached the server is a TypeError
-// whose message says so. Only a network problem is fixed by trying again, so
-// each message says which it was.
+// whose message says so. A network problem is the one a retry reliably
+// fixes, so each message says whether it was one.
 
 /** What one of our API routes answered: a message written for the person, safe to show as is. */
 export class ApiError extends Error {

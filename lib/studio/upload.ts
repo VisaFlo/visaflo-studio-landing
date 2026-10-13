@@ -56,7 +56,7 @@ export type SampleRequest = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: Recording["source"]
-  checks?: Recording["checks"]
+  checks: Recording["checks"]
   name: string
   firm: string
   topicId: string

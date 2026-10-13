@@ -20,7 +20,7 @@ import {
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
-import { faceVerdict, markPlayable, type Check, type RecordingChecks } from "@/lib/studio/checks"
+import { faceVerdict, markPlayable, RECOVERED_CHECKS, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { ApiError, describeSubmitError, uploadFailureReason, type UploadFailure } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
@@ -56,7 +56,10 @@ type UploadState = { status: "idle" } | { status: "uploading"; progress: number 
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
-const CUT_OFF_NOTICE = "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again."
+const CUT_OFF_NOTICE: ReviewNotice = {
+  text: "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again.",
+  partial: true,
+}
 
 export function CaptureFlow() {
   const router = useRouter()
@@ -78,9 +81,10 @@ export function CaptureFlow() {
   // Counts takes, so a Finish that was still completing when the person
   // pressed Start over doesn't go on to the review.
   const take = useRef(0)
-  // A Finish is waiting on the recorder's final data: the saved take is
-  // spoken for, and a camera that dies meanwhile must not interrupt it.
-  const finishing = useRef(false)
+  // The recorder a Finish is waiting on: the saved take is the Finish's (only
+  // Start over may still discard it, by cancelling this), and a camera that
+  // dies meanwhile must not interrupt it.
+  const finishing = useRef<ActiveRecorder | null>(null)
   // What the framing step saw (null: the tracker never ran) and a tally of
   // the readings while recording, which decide the recording's face check.
   const alignFaceSeen = useRef<Check>(null)
@@ -130,13 +134,15 @@ export function CaptureFlow() {
             mime: stored.mime,
             seconds: stored.finished?.seconds ?? chunks,
             source: "camera",
-            checks: stored.finished?.checks,
+            // Nothing was saved for an unfinished take: say so rather than
+            // leave the checks out, so the team reads "not recorded".
+            checks: stored.finished?.checks ?? RECOVERED_CHECKS,
           })
           setReviewNotice(
             !stored.finished
               ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.", partial: true }
               : stored.finished.cutOff
-                ? { text: CUT_OFF_NOTICE, partial: true }
+                ? CUT_OFF_NOTICE
                 : { text: "We kept your last recording. Watch it, then submit it or record again.", partial: false },
           )
           setStep("review")
@@ -189,22 +195,20 @@ export function CaptureFlow() {
     typeof window !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(pickRecordingMime())
 
   // The camera or the recorder gave out (unplugged, taken by another app, a
-  // tab the phone put to sleep): stop pretending to record and say so. A take
-  // in progress goes too, saved chunks included, or a later visit would offer
-  // it back as "the page closed while you were recording", which isn't what
-  // happened.
+  // tab the phone put to sleep): stop pretending to record and say so (also
+  // how a Finish that collected nothing is reported). A take in progress goes
+  // too, saved chunks included, or a later visit would offer it back as "the
+  // page closed while you were recording", which isn't what happened.
   const abandonCamera = useCallback(
     (reason: string) => {
-      // A Finish already waiting on its data owns the take: the camera is
-      // released and finishRecording goes on to the review with its own
-      // notice (cutOff, if the recorder noticed).
-      if (finishing.current) {
-        stopCamera()
-        return
-      }
-      // Otherwise only a take in progress is the one being abandoned; with
-      // nothing recording (the align step) a saved take is the review step's
-      // to keep or clear and stays.
+      // A Finish already waiting on its data owns the take: the dead tracks
+      // sit until finishRecording releases them and goes on to the review
+      // with its own notice (cutOff, if the recorder noticed). Releasing them
+      // here would unmount the script step onto a blank page meanwhile.
+      if (finishing.current) return
+      // Otherwise only a take in progress is abandoned; with nothing
+      // recording (the align step) a saved take is the review step's to keep
+      // or clear and stays.
       const active = recorder.current
       recorder.current = null
       if (active) {
@@ -322,6 +326,10 @@ export function CaptureFlow() {
     const active = recorder.current
     recorder.current = null
     active?.cancel()
+    // A Finish still waiting is ended now, so its recorder can't save a late
+    // chunk under the take being cleared, and its result is dropped below.
+    finishing.current?.cancel()
+    finishing.current = null
     if (user) void clearTake(user.uid)
     setStep(stream ? "align" : "camera")
   }
@@ -331,14 +339,14 @@ export function CaptureFlow() {
     recorder.current = null
     if (!active) return
     const started = take.current
-    finishing.current = true
+    finishing.current = active
     let result: StoppedTake
     try {
       // stop() waits for the recorder's final data, or gives up after a few
       // seconds with what there is (then `cutOff`), and cleans up either way.
       result = await active.stop()
     } finally {
-      finishing.current = false
+      if (finishing.current === active) finishing.current = null
     }
     // Start over was pressed while this clip was finishing: that decision
     // wins. (A camera that died meanwhile does not: abandonCamera leaves a
@@ -367,7 +375,7 @@ export function CaptureFlow() {
       }
     })
     setReviewError(null)
-    setReviewNotice(result.cutOff ? { text: CUT_OFF_NOTICE, partial: true } : null)
+    setReviewNotice(result.cutOff ? CUT_OFF_NOTICE : null)
     setStep("review")
   }, [abandonCamera, stopCamera, user])
 
@@ -605,8 +613,9 @@ export function CaptureFlow() {
               // Whether this browser could play its own take back travels with
               // the checks, so the team hears about a damaged file.
               setRecording((r) => {
-                const checks = markPlayable(r?.checks, playable)
-                return r && checks !== r.checks ? { ...r, checks } : r
+                if (!r) return r
+                const checks = markPlayable(r.checks, playable)
+                return checks === r.checks ? r : { ...r, checks }
               })
             }
             onSubmit={submitRecording}

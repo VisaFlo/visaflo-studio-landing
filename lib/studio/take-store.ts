@@ -20,7 +20,8 @@ export type StoredTake = {
   /**
    * Set once Finish completed; absent when the page closed mid-recording
    * (then nothing was measured). `cutOff` is the recorder's verdict that the
-   * take ended early, kept so a reload tells the same story.
+   * take ended early, kept so a reload tells the same story; it is absent
+   * only on takes stored before it existed, read as not cut off.
    */
   finished?: { seconds: number; checks: RecordingChecks; cutOff?: boolean }
 }

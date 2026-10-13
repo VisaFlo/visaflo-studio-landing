@@ -40,7 +40,10 @@ describe("asEmail", () => {
   it("refuses an over-long address rather than cutting it into a different one", () => {
     expect(asEmail(`${"a".repeat(300)}@b.c`)).toBeUndefined()
     expect(asEmail(`dan@firm.ca${"x".repeat(300)}`)).toBeUndefined()
-    const longest = `${"a".repeat(LIMITS.email - 4)}@b.c`
+    // 254 characters: RFC 5321's 256-octet path less its angle brackets.
+    const longest = `${"a".repeat(250)}@b.c`
+    expect(longest).toHaveLength(254)
+    expect(LIMITS.email).toBe(254)
     expect(asEmail(longest)).toBe(longest)
     expect(asEmail(`a${longest}`)).toBeUndefined()
   })

@@ -33,11 +33,10 @@ export type Recording = {
   seconds: number
   source: "camera"
   /**
-   * What the live checks saw; absent for a take recovered after the page
-   * closed mid-recording, unless the review player then found it unplayable
-   * (see markPlayable).
+   * What the live checks saw, or RECOVERED_CHECKS for a take recovered after
+   * the page closed mid-recording. The review player adds `playable`.
    */
-  checks?: RecordingChecks
+  checks: RecordingChecks
 }
 
 /** A finished take. `seconds` is how much was actually recorded, from the data the recorder produced. */
@@ -50,7 +49,8 @@ export type StoppedTake = {
    * The take ends early: the recorder reported an error at any point (before
    * Finish the flow also hears it through `onEnded` and normally discards the
    * take), never confirmed stopping within stop()'s timeout, or was cancelled
-   * while a stop() was waiting.
+   * (a stop() already waiting, or one made after cancel(), gets the chunks so
+   * far).
    */
   cutOff: boolean
 }

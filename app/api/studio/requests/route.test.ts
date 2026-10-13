@@ -91,6 +91,13 @@ describe("POST /api/studio/requests", () => {
     )
   })
 
+  it("logs at most 300 characters of a body that isn't an object", async () => {
+    expect((await postRaw(JSON.stringify(Array(400).fill("x")))).status).toBe(400)
+    const logged = vi.mocked(console.error).mock.calls.at(-1)?.[1]
+    expect(typeof logged).toBe("string")
+    expect((logged as string).length).toBeLessThanOrEqual(300)
+  })
+
   it("never lets an infinite length reach the email (1e999 parses as Infinity)", async () => {
     // Raw text: JSON.stringify would have turned 1e999 into null.
     const body = JSON.stringify(BODY).replace("61.4", "1e999")

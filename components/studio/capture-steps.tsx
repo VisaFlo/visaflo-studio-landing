@@ -715,6 +715,9 @@ function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
  */
 export type ReviewNotice = { text: string; partial: boolean }
 
+/** How long after a play press the review waits for playback to get going before saying it hasn't. */
+const STALL_MS = 5000
+
 export function ReviewStep({
   recording,
   consent,
@@ -743,13 +746,20 @@ export function ReviewStep({
   // A play() that was refused without the element reporting an error: the
   // button must not look dead.
   const [playRefused, setPlayRefused] = useState(false)
+  // Playback was asked for but never got going (a file whose header parses
+  // and whose data never decodes fires neither `playing` nor `error`): the
+  // person gets a word, the take is not flagged, since nothing was reported.
+  const [stalled, setStalled] = useState(false)
+  const stallTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(stallTimer.current), [])
   const checks = recording.checks
   // The flow records the player's "no" in the take's checks (and keeps it),
   // so the take itself says whether it played.
-  const unplayable = checks?.playable === false
+  const unplayable = checks.playable === false
   const short = recording.seconds < 45
-  // A check that never ran isn't a complaint.
-  const allGood = !unplayable && (!checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
+  // A check that never ran isn't a complaint; a recovered take's placeholders
+  // aren't readings.
+  const allGood = !unplayable && (checks.recovered || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
 
   function play() {
     setPlayRefused(false)
@@ -762,6 +772,13 @@ export function ReviewStep({
     })
   }
 
+  function startedPlaying() {
+    window.clearTimeout(stallTimer.current)
+    setStalled(false)
+    setPlayRefused(false)
+    onPlayable(true)
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
       <div className="relative aspect-[9/16] h-[min(640px,70vh)] shrink-0 overflow-hidden rounded-[28px] bg-stone-700">
@@ -771,12 +788,18 @@ export function ReviewStep({
           src={recording.url}
           playsInline
           controls={playing}
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            setPlaying(true)
+            // If nothing plays within a few seconds, say so (see `stalled`).
+            window.clearTimeout(stallTimer.current)
+            stallTimer.current = window.setTimeout(() => setStalled(true), STALL_MS)
+          }}
           // `playing`, not `play`: `play` fires on the press; `playing` only
           // once the browser has decoded enough to advance.
-          onPlaying={() => onPlayable(true)}
+          onPlaying={startedPlaying}
           onError={(event) => {
             console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
+            window.clearTimeout(stallTimer.current)
             onPlayable(false)
           }}
           className={cn("size-full object-cover", !playing && "-scale-x-100")}
@@ -787,7 +810,12 @@ export function ReviewStep({
               ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
               : "This recording looks damaged and may not play for us either. We recommend recording again."}
           </p>
+        ) : stalled ? (
+          <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
+            This recording isn&apos;t playing. You can still submit it; recording again is safer.
+          </p>
         ) : (
+          !playing &&
           playRefused && (
             <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">Playback didn&apos;t start. Try again.</p>
           )
@@ -817,7 +845,7 @@ export function ReviewStep({
           </p>
         )}
         {/* A recovered take's two readings are placeholders, not results. */}
-        {checks && !checks.recovered && (
+        {!checks.recovered && (
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
             <Chip ok={checks.faceSeen}>
               {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}
