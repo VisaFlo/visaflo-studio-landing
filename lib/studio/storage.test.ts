@@ -1,33 +1,43 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { buildMultipart, mediaUrl } from "@/lib/studio/storage"
+import { firstDownloadToken, listObjects, mediaUrl, storageBase, StorageError } from "@/lib/studio/storage"
+import { fakeBucket } from "@/lib/studio/test-bucket"
 
 describe("mediaUrl", () => {
   it("encodes the object name and carries the token", () => {
-    expect(mediaUrl("studio/u1/s1/sample/speech.mp3", "abc")).toBe(
-      "https://firebasestorage.googleapis.com/v0/b/devdashboard-c9159-ca/o/studio%2Fu1%2Fs1%2Fsample%2Fspeech.mp3?alt=media&token=abc",
+    expect(mediaUrl("studio/u1/s1/recording.mp4", "abc")).toBe(
+      `${storageBase()}/v0/b/devdashboard-c9159-ca/o/studio%2Fu1%2Fs1%2Frecording.mp4?alt=media&token=abc`,
     )
   })
 })
 
-describe("buildMultipart", () => {
-  it("writes the metadata part then the file part, Firebase SDK style", () => {
-    const { contentType, body } = buildMultipart("studio/u/s/sample/a.json", '{"x":1}', "application/json", { k: "v" })
-    const text = new TextDecoder().decode(body)
-    const boundary = contentType.replace("multipart/related; boundary=", "")
-    expect(boundary.length).toBeGreaterThan(8)
-    expect(text.startsWith(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n`)).toBe(true)
-    expect(text).toContain('"name":"studio/u/s/sample/a.json"')
-    expect(text).toContain('"contentType":"application/json"')
-    expect(text).toContain('"metadata":{"k":"v"}')
-    expect(text).toContain(`\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n{"x":1}\r\n--${boundary}--`)
+describe("firstDownloadToken", () => {
+  it("takes the first of the comma-joined tokens, or nothing", () => {
+    expect(firstDownloadToken({ name: "x", downloadTokens: "a,b" })).toBe("a")
+    expect(firstDownloadToken({ name: "x" })).toBeUndefined()
+    expect(firstDownloadToken({ name: "x", downloadTokens: "" })).toBeUndefined()
+  })
+})
+
+describe("listObjects", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("follows nextPageToken so a long folder isn't cut off at one page", async () => {
+    const fetch = fakeBucket({
+      listings: {
+        "studio/": { prefixes: ["studio/u1/"], nextPageToken: "p2" },
+        "studio/#p2": { prefixes: ["studio/u2/"], items: ["studio/x.json"] },
+      },
+    })
+    expect(await listObjects("t", "studio/")).toEqual({ prefixes: ["studio/u1/", "studio/u2/"], items: ["studio/x.json"] })
+    const second = new URL(String(fetch.mock.calls[1][0]))
+    expect(second.searchParams.get("pageToken")).toBe("p2")
+    expect(second.searchParams.get("delimiter")).toBe("/")
   })
 
-  it("keeps binary bodies intact", () => {
-    const bytes = new Uint8Array([0, 255, 10, 13, 128])
-    const { body } = buildMultipart("f.bin", bytes, "application/octet-stream")
-    const text = new TextDecoder("latin1").decode(body)
-    const idx = text.indexOf("\r\n\r\n", text.indexOf("application/octet-stream")) + 4
-    expect(Array.from(body.slice(idx, idx + 5))).toEqual([0, 255, 10, 13, 128])
+  it("throws a StorageError that keeps the status", async () => {
+    fakeBucket({ listings: { "studio/": 403 } })
+    await expect(listObjects("t", "studio/")).rejects.toMatchObject({ name: "StorageError", status: 403 })
+    expect(new StorageError(500, "x".repeat(400)).message.length).toBeLessThan(330)
   })
 })

@@ -10,8 +10,9 @@ describe("portraitCrop", () => {
 
   it("keeps a phone's portrait frame whole", () => {
     expect(portraitCrop(1080, 1920)).toEqual({ x: 0, y: 0, w: 1080, h: 1920 })
-    // Taller than 9:16 (a full-screen phone sensor) stays whole too; the
-    // pipeline fits it to 9:16 later.
+    // Taller than 9:16 (a full-screen phone sensor) stays whole too: the
+    // recording keeps the phone's own aspect and is fitted to 9:16 when the
+    // sample is edited.
     expect(portraitCrop(1080, 2340)).toEqual({ x: 0, y: 0, w: 1080, h: 2340 })
   })
 })

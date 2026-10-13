@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import Link from "next/link"
 import type { User } from "firebase/auth"
 
@@ -8,27 +7,11 @@ import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
 import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel, SecondaryButton } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
+import { useAdminLoad } from "@/lib/studio/admin-client"
 import { clipLength, submissionHref, when } from "@/lib/studio/admin-format"
+import { checkFlags } from "@/lib/studio/checks"
 
-type Load =
-  | { status: "loading" }
-  | { status: "ready"; submissions: Submission[] }
-  | { status: "unverified" }
-  | { status: "error"; message: string }
-
-async function requestSubmissions(user: User): Promise<Load> {
-  try {
-    // A fresh token, so a just-verified email counts right away.
-    const token = await user.getIdToken(true)
-    const response = await fetch("/api/admin/submissions", { headers: { Authorization: `Bearer ${token}` } })
-    const body = (await response.json().catch(() => ({}))) as { submissions?: Submission[]; error?: string; code?: string }
-    if (body.code === "unverified") return { status: "unverified" }
-    if (!response.ok || !body.submissions) return { status: "error", message: body.error ?? `Request failed (${response.status})` }
-    return { status: "ready", submissions: body.submissions }
-  } catch {
-    return { status: "error", message: "No connection. Check your internet, then reload." }
-  }
-}
+const pickSubmissions = (body: Record<string, unknown>) => (Array.isArray(body.submissions) ? (body.submissions as Submission[]) : undefined)
 
 // The list. Each row links to its own page (recording, details) and can save
 // the original recording straight from here.
@@ -37,22 +20,7 @@ export function Admin() {
 }
 
 function AdminList({ user }: { user: User }) {
-  const [load, setLoad] = useState<Load>({ status: "loading" })
-
-  useEffect(() => {
-    let cancelled = false
-    void requestSubmissions(user).then((result) => {
-      if (!cancelled) setLoad(result)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [user])
-
-  function reload() {
-    setLoad({ status: "loading" })
-    void requestSubmissions(user).then(setLoad)
-  }
+  const { load, reload } = useAdminLoad(user, "/api/admin/submissions", pickSubmissions)
 
   return (
     <>
@@ -68,7 +36,7 @@ function AdminList({ user }: { user: User }) {
 
       {load.status === "unverified" && <VerifyEmail user={user} onVerified={reload} />}
       {load.status === "error" && <ErrorText>{load.message}</ErrorText>}
-      {load.status === "ready" && <SubmissionTable user={user} submissions={load.submissions} />}
+      {load.status === "ready" && <SubmissionTable user={user} submissions={load.data} />}
     </>
   )
 }
@@ -106,9 +74,8 @@ function SubmissionTable({ user, submissions }: { user: User; submissions: Submi
 }
 
 function SubmissionRow({ user, submission: s }: { user: User; submission: Submission }) {
-  const flags = s.checks
-    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard"].filter((f): f is string => Boolean(f))
-    : []
+  const flags = checkFlags(s.checks)
+  const requestUnreadable = s.problems.some((p) => p.kind === "request-unreadable")
   const href = submissionHref(s.id)
   return (
     <tr className="border-b border-stone-200 hover:bg-stone-50">
@@ -125,7 +92,12 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
       </td>
       <td className="max-w-[280px] py-3 pr-4">
         <Link href={href} className="block truncate">
-          {s.topicTitle ?? <span className="text-stone-500">No topic picked yet</span>}
+          {s.topicTitle ??
+            (requestUnreadable ? (
+              <span className="text-[#9a3412]">Couldn&apos;t read request.json</span>
+            ) : (
+              <span className="text-stone-500">No topic picked yet</span>
+            ))}
         </Link>
       </td>
       <td className="py-3 pr-4 whitespace-nowrap text-stone-600">
@@ -135,13 +107,13 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
       </td>
       <td className="py-3 pr-4">
         <Link href={href} className="flex flex-wrap gap-2">
-          {s.status === "recorded" && <Tag tone="muted">Recorded only</Tag>}
+          {s.status === "recorded" && !requestUnreadable && <Tag tone="muted">Recorded only</Tag>}
           {flags.map((f) => (
             <Tag key={f} tone="warn">
               {f}
             </Tag>
           ))}
-          {s.problem && <Tag tone="warn">Read problem</Tag>}
+          {s.problems.length > 0 && <Tag tone="warn">Read problem</Tag>}
         </Link>
       </td>
       <td className="py-2 whitespace-nowrap">

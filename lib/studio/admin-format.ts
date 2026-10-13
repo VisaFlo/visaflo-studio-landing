@@ -1,4 +1,6 @@
 // Small formatters shared by the admin list and the submission page.
+
+// The team reads these in Vancouver, whatever machine opens the page.
 export function when(iso?: string): string {
   if (!iso || Number.isNaN(Date.parse(iso))) return "—"
   return new Date(iso).toLocaleString("en-CA", { timeZone: "America/Vancouver", dateStyle: "medium", timeStyle: "short" })
@@ -6,7 +8,8 @@ export function when(iso?: string): string {
 
 export function clipLength(seconds?: number): string {
   if (!seconds) return "—"
-  return `${Math.floor(seconds / 60)}:${String(Math.round(seconds) % 60).padStart(2, "0")}`
+  const total = Math.round(seconds)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`
 }
 
 export function megabytes(bytes: number): string {

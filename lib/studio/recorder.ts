@@ -1,5 +1,7 @@
 "use client"
 
+import type { Check, RecordingChecks } from "@/lib/studio/checks"
+
 // MediaRecorder container the browser can write: MP4 on Safari, WebM on
 // Chrome and Firefox (newer Chrome can do MP4 too, which we prefer).
 const MIME_CANDIDATES = [
@@ -32,10 +34,9 @@ export type Recording = {
   checks?: RecordingChecks
 }
 
-export type RecordingChecks = { faceSeen: boolean; voiceHeard: boolean }
-
 export type ActiveRecorder = {
-  stop: () => Promise<{ blob: Blob; mime: string; seconds: number; voiceHeard: boolean }>
+  /** voiceHeard is null when the mic couldn't be read, not false. */
+  stop: () => Promise<{ blob: Blob; mime: string; seconds: number; voiceHeard: Check }>
   cancel: () => void
   /** Mic loudness right now, 0 to about 1. */
   level: () => number
@@ -88,8 +89,10 @@ export function startRecording(
       micReadable = true
       if (rms > VOICE_RMS) voiceMs += 100
     }, 100)
-  } catch {
-    voiceMs = Infinity
+  } catch (error) {
+    // No AudioContext (old browser, blocked autoplay policy): record anyway,
+    // and report the voice check as not run rather than passed.
+    console.warn("Mic level can't be read; recording without the voice check", error)
   }
 
   const cleanup = () => {
@@ -107,7 +110,7 @@ export function startRecording(
             blob: new Blob(chunks, { type }),
             mime: type,
             seconds: Math.round((performance.now() - startedAt) / 1000),
-            voiceHeard: voiceMs >= 2000,
+            voiceHeard: micReadable ? voiceMs >= 2000 : null,
           })
         }
         if (recorder.state === "inactive") recorder.onstop(new Event("stop"))

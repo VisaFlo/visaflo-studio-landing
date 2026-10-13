@@ -45,9 +45,11 @@ export function useFaceFrames(video: HTMLVideoElement | null, onFrame: (frame: F
           try {
             callback.current(readFace(landmarker, video, t))
             failures = 0
-          } catch {
+          } catch (error) {
             // A dropped frame is fine; two seconds of them (lost GPU context
-            // after backgrounding, for one) means the tracker is gone.
+            // after backgrounding, for one) means the tracker is gone. The
+            // first one is logged so a real fault isn't invisible.
+            if (failures === 0) console.warn("Face tracking frame failed", error)
             if (++failures >= 30) {
               cancelAnimationFrame(raf)
               setStatus("unavailable")

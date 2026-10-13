@@ -1,8 +1,7 @@
 import { requireAdmin } from "@/lib/studio/admin-auth"
-import { listObjects, storageGet } from "@/lib/studio/storage"
-import { downloadName, parseSubmissionId, recordingObject, StorageError } from "@/lib/studio/submissions"
-
-type RequestJson = { name?: string; email?: string }
+import { storageFailure } from "@/lib/studio/admin-errors"
+import { listObjects, storageGet, storageJson, StorageError } from "@/lib/studio/storage"
+import { downloadName, parseSubmissionId, readRequestJson, recordingObject, submissionFolder, type RequestJson } from "@/lib/studio/submissions"
 
 // One submission's original recording as a file download
 // (?id=uid/submissionId). The bytes stream through here because the bucket
@@ -14,15 +13,23 @@ export async function GET(request: Request) {
 
   const ref = parseSubmissionId(new URL(request.url).searchParams.get("id"))
   if (!ref) return Response.json({ error: "Unknown submission." }, { status: 400 })
-  const folder = `studio/${ref.uid}/${ref.submissionId}`
+  const folder = submissionFolder(ref)
 
   try {
     const { items } = await listObjects(admin.token, `${folder}/`)
     const recording = recordingObject(items)
     if (!recording) return Response.json({ error: "No recording in that folder." }, { status: 404 })
-    const details = await storageGet(admin.token, `/${encodeURIComponent(`${folder}/request.json`)}?alt=media`)
-      .then((r) => r.json() as Promise<RequestJson>)
-      .catch(() => ({}) as RequestJson)
+
+    // The name only decides the file name, so a missing or broken
+    // request.json falls back to the uid; a refused read still fails the
+    // whole download (it would fail the bytes too).
+    const details = await storageJson<unknown>(admin.token, `${folder}/request.json`)
+      .then(readRequestJson)
+      .catch((error: unknown): RequestJson => {
+        if (error instanceof StorageError && (error.status === 401 || error.status === 403)) throw error
+        if (!(error instanceof StorageError && error.status === 404)) console.error(`Could not read request.json for ${ref.uid}/${ref.submissionId}`, error)
+        return {}
+      })
 
     const media = await storageGet(admin.token, `/${encodeURIComponent(recording)}?alt=media`)
     const headers = new Headers({
@@ -34,13 +41,7 @@ export async function GET(request: Request) {
     if (length) headers.set("Content-Length", length)
     return new Response(media.body, { headers })
   } catch (error) {
-    console.error("Failed to download a Studio recording", error)
-    if (error instanceof StorageError && (error.status === 401 || error.status === 403)) {
-      return Response.json(
-        { error: "Storage refused the read. Publish the latest docs/studio-capture/storage.rules, then reload." },
-        { status: 502 },
-      )
-    }
-    return Response.json({ error: "We couldn't download the recording. Try again." }, { status: 500 })
+    console.error(`Failed to download the recording for ${ref.uid}/${ref.submissionId}`, error)
+    return storageFailure(error) ?? Response.json({ error: "We couldn't download the recording. Try again." }, { status: 500 })
   }
 }

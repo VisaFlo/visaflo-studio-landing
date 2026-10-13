@@ -1,11 +1,12 @@
 import { escapeHtml, sendMail, TEAM_INBOX } from "@/lib/sendgrid"
+import { describeChecks, type RecordingChecks } from "@/lib/studio/checks"
+import { BUCKET } from "@/lib/studio/project"
+import { consoleUrl } from "@/lib/studio/storage"
 import { detailsTable, vancouverTime } from "@/lib/waitlist-mail"
 
 // One email per finished recording, to the same inbox as waitlist signups.
 // Fixed subject so the inbox can filter and count them.
 export const SUBJECT = "[VisaFlo Studio] New sample recording"
-
-const BUCKET = "devdashboard-c9159-ca"
 
 export type StudioRequestMail = {
   uid: string
@@ -19,7 +20,7 @@ export type StudioRequestMail = {
   recordingPath: string
   recordingSeconds: number
   recordingSource: "camera" | "upload"
-  checks?: { faceSeen: boolean; voiceHeard: boolean }
+  checks?: RecordingChecks
   consentAt: string
 }
 
@@ -29,15 +30,8 @@ function minutes(seconds: number): string {
 
 export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<void> {
   const folder = entry.recordingPath.slice(0, entry.recordingPath.lastIndexOf("/"))
-  const consoleUrl = `https://console.firebase.google.com/project/devdashboard-c9159/storage/${BUCKET}/files/~2F${folder
-    .split("/")
-    .join("~2F")}`
-  const checks = entry.checks
-    ? [
-        entry.checks.faceSeen ? "face seen" : "NO FACE SEEN",
-        entry.checks.voiceHeard ? "voice heard" : "NO VOICE HEARD",
-      ].join(", ")
-    : "uploaded file, not checked"
+  const folderUrl = consoleUrl(folder)
+  const checks = entry.checks ? describeChecks(entry.checks) : "uploaded file, not checked"
 
   const { text, html } = detailsTable([
     ["Firm name", entry.firm || "—"],
@@ -54,8 +48,8 @@ export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<
   await sendMail({
     to: TEAM_INBOX,
     subject: SUBJECT,
-    text: `${text}\n\nOpen the folder: ${consoleUrl}`,
-    html: `${html}<p style="font:15px/1.5 -apple-system,Segoe UI,sans-serif"><a href="${escapeHtml(consoleUrl)}">Open the folder in Firebase</a></p>`,
+    text: `${text}\n\nOpen the folder: ${folderUrl}`,
+    html: `${html}<p style="font:15px/1.5 -apple-system,Segoe UI,sans-serif"><a href="${escapeHtml(folderUrl)}">Open the folder in Firebase</a></p>`,
     replyTo: { email: entry.email, name: entry.name || undefined },
   })
 }

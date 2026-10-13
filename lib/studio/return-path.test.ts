@@ -14,5 +14,9 @@ describe("returnPath", () => {
     expect(returnPath("//evil.example")).toBe("/start")
     expect(returnPath("/admin/../x")).toBe("/start")
     expect(returnPath("/settings")).toBe("/start")
+    // Not a loose prefix match either.
+    expect(returnPath("/adminx")).toBe("/start")
+    expect(returnPath("/admin?next=x")).toBe("/start")
+    expect(returnPath("/ADMIN")).toBe("/start")
   })
 })

@@ -5,17 +5,19 @@ import { connectAuthEmulator, getAuth, type Auth } from "firebase/auth"
 import { connectFirestoreEmulator, getFirestore, type Firestore } from "firebase/firestore"
 import { connectStorageEmulator, getStorage, type FirebaseStorage } from "firebase/storage"
 
+import { BUCKET, PROJECT_ID } from "@/lib/studio/project"
+
 // Studio signs people in against the VisaFlo production Firebase project, so a
 // VisaFlo account works here unchanged and a Studio account works in VisaFlo.
 // These are the public web-app values (the same ones my.vflo.app ships).
-export const FIREBASE_PROJECT_ID = "devdashboard-c9159"
+export const FIREBASE_PROJECT_ID = PROJECT_ID
 
 const config = {
   apiKey: "AIzaSyAUeWHyep0uBj6NPMU9Av0Rn9uoM4Ohq5s",
-  authDomain: "devdashboard-c9159.firebaseapp.com",
-  projectId: FIREBASE_PROJECT_ID,
+  authDomain: `${PROJECT_ID}.firebaseapp.com`,
+  projectId: PROJECT_ID,
   // Canada-region bucket and database, the ones VisaFlo moved to in 2026-09.
-  storageBucket: "devdashboard-c9159-ca",
+  storageBucket: BUCKET,
   messagingSenderId: "1051689408312",
   appId: "1:1051689408312:web:e812d0a48a87ddd62593cd",
 }

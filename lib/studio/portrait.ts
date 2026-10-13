@@ -1,9 +1,9 @@
 "use client"
 
-// The sample is a vertical short, so the recording is vertical from the
-// start. A phone held upright already gives 9:16; a laptop webcam gives
-// 16:9, and we keep only its middle 9:16 column (the preview shows exactly
-// that, so people frame themselves for it).
+// The sample video VisaFlo edits from this recording is a vertical short, so
+// the recording is vertical from the start. A phone held upright already
+// gives 9:16; a laptop webcam gives 16:9, and we keep only its middle 9:16
+// column (the preview shows exactly that, so people frame themselves for it).
 
 export type Crop = { x: number; y: number; w: number; h: number }
 
@@ -13,30 +13,46 @@ export function portraitCrop(width: number, height: number): Crop {
   return { x: Math.round((width - w) / 2), y: 0, w, h: height }
 }
 
-export type PortraitStream = { stream: MediaStream; stop: () => void }
+export type PortraitStream = {
+  stream: MediaStream
+  /** Releases only what portraitStream made (the canvas track and its timer), never the camera's own tracks. */
+  stop: () => void
+}
 
 const FPS = 30
 
 // A stream whose video is the portrait crop of `source`'s camera, with the
-// same audio. For a portrait camera it is `source` itself.
+// same audio. For a portrait or square camera it is `source` itself.
 export function portraitStream(source: MediaStream): PortraitStream {
   const track = source.getVideoTracks()[0]
   const { width = 0, height = 0 } = track?.getSettings() ?? {}
-  if (!track || !width || !height || height >= width) return { stream: source, stop: () => {} }
+  if (!track) return { stream: source, stop: () => {} }
+  if (!width || !height) {
+    // Some browsers report no size before the first frame; the recording
+    // then keeps the camera's own frame, which the editor fits later.
+    console.warn("portraitStream: the camera reported no frame size; recording it as is")
+    return { stream: source, stop: () => {} }
+  }
+  if (height >= width) return { stream: source, stop: () => {} }
 
   const crop = portraitCrop(width, height)
   const video = document.createElement("video")
   video.muted = true
   video.playsInline = true
   video.srcObject = new MediaStream([track])
-  void video.play().catch(() => {})
+  void video.play().catch((error: unknown) => console.warn("portraitStream: the camera video wouldn't play", error))
 
   const canvas = document.createElement("canvas")
   canvas.width = crop.w
   canvas.height = crop.h
   const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("Canvas 2D is unavailable, so the camera frame can't be cropped")
+  // readyState 2 is HAVE_CURRENT_DATA: a frame is there to copy. A timer
+  // rather than requestAnimationFrame so drawing goes on when the tab is
+  // hidden, as far as the browser allows (both slow to about once a second
+  // in the background, so a recording made from a hidden tab stutters).
   const draw = () => {
-    if (ctx && video.readyState >= 2) ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
+    if (video.readyState >= 2) ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
   }
   const timer = window.setInterval(draw, 1000 / FPS)
 

@@ -5,6 +5,8 @@
 // of reading. One take per account; it's cleared once the request is sent or
 // the person starts over.
 
+import type { RecordingChecks } from "@/lib/studio/checks"
+
 const DB_NAME = "vf-studio"
 const TAKES = "takes"
 const CHUNKS = "chunks"
@@ -15,8 +17,8 @@ export type StoredTake = {
   mime: string
   source: "camera" | "upload"
   startedAt: number
-  /** Set when the person pressed Finish (or picked a file); absent if cut off. */
-  finished?: { seconds: number; checks?: { faceSeen: boolean; voiceHeard: boolean } }
+  /** Set when the person pressed Finish; absent if the take was cut off. */
+  finished?: { seconds: number; checks?: RecordingChecks }
 }
 
 let opening: Promise<IDBDatabase> | null = null

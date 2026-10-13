@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import Link from "next/link"
 import type { User } from "firebase/auth"
 
@@ -8,26 +7,13 @@ import { AdminShell, Tag, VerifyEmail } from "@/components/studio/admin-shell"
 import { DownloadRecording } from "@/components/studio/download-recording"
 import { Display, ErrorText, MonoLabel } from "@/components/studio/ui"
 import type { Submission } from "@/lib/studio/admin"
+import { useAdminLoad } from "@/lib/studio/admin-client"
 import { clipLength, megabytes, when } from "@/lib/studio/admin-format"
+import { checkFlags } from "@/lib/studio/checks"
+import { describeProblems } from "@/lib/studio/submissions"
 
-type Load =
-  | { status: "loading" }
-  | { status: "ready"; submission: Submission }
-  | { status: "unverified" }
-  | { status: "error"; message: string }
-
-async function requestSubmission(user: User, id: string): Promise<Load> {
-  try {
-    const token = await user.getIdToken(true)
-    const response = await fetch(`/api/admin/submissions?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}` } })
-    const body = (await response.json().catch(() => ({}))) as { submission?: Submission; error?: string; code?: string }
-    if (body.code === "unverified") return { status: "unverified" }
-    if (!response.ok || !body.submission) return { status: "error", message: body.error ?? `Request failed (${response.status})` }
-    return { status: "ready", submission: body.submission }
-  } catch {
-    return { status: "error", message: "No connection. Check your internet, then reload." }
-  }
-}
+const pickSubmission = (body: Record<string, unknown>) =>
+  body.submission && typeof body.submission === "object" ? (body.submission as Submission) : undefined
 
 // One submission: who they are, the recording, and a button to save the
 // original file. Sample videos are made by hand from that download.
@@ -40,17 +26,7 @@ export function SubmissionPage({ id }: { id: string }) {
 }
 
 function SubmissionBody({ user, id }: { user: User; id: string }) {
-  const [load, setLoad] = useState<Load>({ status: "loading" })
-
-  useEffect(() => {
-    let cancelled = false
-    void requestSubmission(user, id).then((r) => {
-      if (!cancelled) setLoad(r)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [user, id])
+  const { load, reload } = useAdminLoad(user, `/api/admin/submissions?id=${encodeURIComponent(id)}`, pickSubmission)
 
   const back = (
     <Link href="/admin" className="text-[14px] text-stone-600 underline underline-offset-[3px] hover:text-stone-950">
@@ -70,7 +46,7 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
     return (
       <>
         {back}
-        <VerifyEmail user={user} onVerified={() => setLoad({ status: "loading" })} />
+        <VerifyEmail user={user} onVerified={reload} />
       </>
     )
   }
@@ -83,14 +59,13 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
     )
   }
 
-  const s = load.submission
+  const s = load.data
   const title = [s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.uid
-  const flags = s.checks
-    ? [!s.checks.faceSeen && "No face seen", !s.checks.voiceHeard && "No voice heard"].filter((f): f is string => Boolean(f))
-    : []
+  const flags = checkFlags(s.checks)
+  const requestUnreadable = s.problems.some((p) => p.kind === "request-unreadable")
   const rows: [string, string][] = [
     ["Email", s.email ?? "—"],
-    ["Topic", s.topicTitle ?? "Not picked yet"],
+    ["Topic", s.topicTitle ?? (requestUnreadable ? "Couldn't read request.json" : "Not picked yet")],
     ["Recorded", when(s.recordedAt)],
     ["Requested", when(s.requestedAt)],
     ["Length", clipLength(s.seconds)],
@@ -106,13 +81,13 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
         <MonoLabel>Submission</MonoLabel>
         <Display>{title}</Display>
         <div className="flex flex-wrap gap-2">
-          {s.status === "recorded" ? <Tag tone="muted">Recorded only</Tag> : <Tag tone="ok">Topic picked</Tag>}
+          {s.status === "requested" ? <Tag tone="ok">Topic picked</Tag> : requestUnreadable ? null : <Tag tone="muted">Recorded only</Tag>}
           {flags.map((f) => (
             <Tag key={f} tone="warn">
               {f}
             </Tag>
           ))}
-          {s.problem && <Tag tone="warn">Read problem</Tag>}
+          {s.problems.length > 0 && <Tag tone="warn">Read problem</Tag>}
         </div>
       </header>
 
@@ -134,7 +109,7 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
             ))}
           </dl>
           {s.consent && <p className="m-0 border-l-2 border-stone-200 pl-3 text-[13px] text-stone-600">“{s.consent}”</p>}
-          {s.problem && <ErrorText>{s.problem}</ErrorText>}
+          {s.problems.length > 0 && <ErrorText>{describeProblems(s.problems)}</ErrorText>}
           {s.video && (
             <div>
               <DownloadRecording user={user} id={s.id} />

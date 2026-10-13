@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Lightbulb, Monitor, Image as ImageIcon, VolumeX, TriangleAlert } from "lucide-react"
 import type { User } from "firebase/auth"
 
-import { AlignStep, CameraAllowStep, CameraBlockedStep, ReviewStep, ScriptStep } from "@/components/studio/capture-steps"
+import { AlignStep, CameraAllowStep, CameraBlockedStep, FaceWatch, ReviewStep, ScriptStep } from "@/components/studio/capture-steps"
 import {
   AccountHeader,
   Display,
@@ -20,6 +20,7 @@ import {
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
 import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
+import type { Check, RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
@@ -74,7 +75,10 @@ export function CaptureFlow() {
   const [cameraBusy, setCameraBusy] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const recorder = useRef<ActiveRecorder | null>(null)
-  const faceSeen = useRef(false)
+  // What the framing step saw (null: the tracker never ran) and a tally of
+  // the readings while recording, which decide the recording's face check.
+  const alignFaceSeen = useRef<Check>(null)
+  const faceFrames = useRef({ total: 0, found: 0 })
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
@@ -184,6 +188,10 @@ export function CaptureFlow() {
       setStream(portrait.current.stream)
       setStep("align")
     } catch (error) {
+      console.error("Opening the camera failed", error)
+      // A stream that did open (portraitStream threw after getUserMedia) must
+      // not stay live behind an error message.
+      stopCamera()
       const name = error instanceof DOMException ? error.name : ""
       if (name === "NotAllowedError" || name === "SecurityError") setStep("blocked")
       else if (name === "NotFoundError" || name === "OverconstrainedError")
@@ -211,12 +219,26 @@ export function CaptureFlow() {
     return startRecording(media, (chunk, index) => void saveChunk(takeId, index, chunk))
   }
 
-  // Framed and lit: recording starts and the script comes up.
-  function beginScript(result: { faceSeen: boolean }) {
+  // Framing checks passed (or the person chose to start anyway): recording
+  // starts and the script comes up.
+  function beginScript(result: { faceSeen: Check }) {
     if (!stream) return
-    faceSeen.current = result.faceSeen
+    alignFaceSeen.current = result.faceSeen
+    faceFrames.current = { total: 0, found: 0 }
     recorder.current?.cancel()
-    recorder.current = recordTake(stream)
+    try {
+      recorder.current = recordTake(stream)
+    } catch (error) {
+      // MediaRecorder refused the stream (this browser can't record a canvas
+      // stream with the chosen type, or a track ended). Say so instead of
+      // leaving the countdown stuck on 1.
+      console.error("MediaRecorder failed to start", error)
+      recorder.current = null
+      stopCamera()
+      setCameraError("We couldn't start recording in this browser. Try Chrome or Safari, or open this page on your phone.")
+      setStep("camera")
+      return
+    }
     setStep("script")
   }
 
@@ -234,7 +256,12 @@ export function CaptureFlow() {
     // Restart was pressed while this clip was finishing: keep the new take.
     if (recorder.current) return
     stopCamera()
-    const checks = { faceSeen: faceSeen.current, voiceHeard: result.voiceHeard }
+    // With at least two seconds of readings while recording, the face was
+    // there if it was in most of them. Otherwise fall back to what the
+    // framing step saw (null when the tracker never ran).
+    const frames = faceFrames.current
+    const faceSeen: Check = frames.total >= 30 ? frames.found / frames.total >= 0.5 : alignFaceSeen.current
+    const checks: RecordingChecks = { faceSeen, voiceHeard: result.voiceHeard }
     if (user) void finishTake(user.uid, { seconds: result.seconds, checks })
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
@@ -433,6 +460,15 @@ export function CaptureFlow() {
       {step === "script" && stream && (
         <>
           <FlowHeader title="Face and voice" step="Step 2 of 2" onBack={restartRecording} />
+          {camera && (
+            <FaceWatch
+              camera={camera}
+              onFrame={(frame) => {
+                faceFrames.current.total += 1
+                if (frame.found) faceFrames.current.found += 1
+              }}
+            />
+          )}
           <ScriptStep
             stream={stream}
             lines={lines}

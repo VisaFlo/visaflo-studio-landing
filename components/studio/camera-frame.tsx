@@ -5,8 +5,10 @@ import { useEffect, useRef } from "react"
 import { GUIDE } from "@/lib/studio/face-tracker"
 import { cn } from "@/lib/utils"
 
-// The vertical camera preview, phone-shaped, showing exactly what will be
-// recorded, with a dashed oval where the face should sit.
+// The vertical camera preview, phone-shaped, with a dashed oval where the
+// face should sit. For a landscape webcam this is exactly the 9:16 crop that
+// gets recorded; a phone camera's own portrait frame is shown object-fit:
+// cover, so anything beyond 9:16 is recorded but not previewed.
 export function PortraitFrame({
   stream,
   dim,
@@ -33,8 +35,8 @@ export function PortraitFrame({
           <ellipse
             cx={GUIDE.cx * 90}
             cy={GUIDE.cy * 160}
-            rx={21}
-            ry={27}
+            rx={GUIDE.ovalRx}
+            ry={GUIDE.ovalRy}
             fill="none"
             stroke="rgba(255,255,255,0.85)"
             strokeWidth="0.8"

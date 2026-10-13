@@ -6,7 +6,8 @@ import { Camera, CameraOff, Mic, Play, Square, Sun, TriangleAlert } from "lucide
 import { CameraVideo, PortraitFrame } from "@/components/studio/camera-frame"
 import { DoneMark, FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
 import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
-import { checkAlignment, type AlignCheck } from "@/lib/studio/face-tracker"
+import type { Check } from "@/lib/studio/checks"
+import { checkAlignment, type AlignCheck, type FaceFrame } from "@/lib/studio/face-tracker"
 import type { Recording } from "@/lib/studio/recorder"
 import { startRecognizer, speechRecognitionSupported } from "@/lib/studio/speech-recognizer"
 import { useFaceFrames } from "@/lib/studio/use-face-frames"
@@ -28,7 +29,7 @@ function StageLayout({ title, stage, children }: { title: ReactNode; stage: Reac
 const CAPTURE_STEPS = ["Fit your face", "Read the script"]
 
 // The two parts of the recording, named, so it's clear what comes next.
-export function CaptureStepper({ current, progress = 0 }: { current: number; progress?: number }) {
+export function CaptureStepper({ current, progress = 0 }: { current: 0 | 1; progress?: number }) {
   return (
     <ol className="m-0 grid list-none grid-cols-2 gap-1 p-0" aria-label="Recording steps">
       {CAPTURE_STEPS.map((label, i) => (
@@ -210,9 +211,20 @@ function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint
 
 const COUNTDOWN_SECONDS = 3
 
+// Keeps the face check running, off-screen, while the script is read, so the
+// review and the team can tell whether the face stayed in frame. The flow
+// tallies the readings; no readings at all means the tracker never ran.
+export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (frame: FaceFrame) => void }) {
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null)
+  useFaceFrames(video, onFrame)
+  return <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
+}
+
 // `stream` is the vertical crop the person sees and records; `camera` is the
-// raw camera it was cut from. The face check reads the camera frame (which
-// MediaPipe handles reliably) and measures positions inside the same crop.
+// raw camera it was cut from. The face check reads the raw camera, not
+// `stream`: MediaPipe's detectForVideo throws on a canvas-captured stream.
+// readFace measures inside the same 9:16 crop, so the oval check matches
+// the preview.
 export function AlignStep({
   stream,
   camera,
@@ -220,7 +232,8 @@ export function AlignStep({
 }: {
   stream: MediaStream
   camera: MediaStream
-  onStart: (result: { faceSeen: boolean }) => void
+  /** faceSeen is null when the tracker never ran, so nothing is claimed. */
+  onStart: (result: { faceSeen: Check }) => void
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
@@ -275,8 +288,14 @@ export function AlignStep({
   function start() {
     if (started.current) return
     started.current = true
-    // Without live tracking there's no reading to hold against them.
-    onStart({ faceSeen: faceSeen.current || status !== "ready" })
+    try {
+      // Without live tracking there is no reading: "not checked", not "seen".
+      onStart({ faceSeen: status === "ready" ? faceSeen.current : null })
+    } catch (error) {
+      // Let the button work again if starting the recorder threw.
+      started.current = false
+      throw error
+    }
   }
 
   useEffect(() => {
@@ -668,15 +687,17 @@ export function ScriptStep({
   )
 }
 
-function Chip({ ok, children }: { ok: boolean; children: ReactNode }) {
+// ok: true passed, false failed, null never checked (shown neutrally).
+function Chip({ ok, children }: { ok: boolean | null; children: ReactNode }) {
   return (
     <li
       className={cn(
         "flex h-8 items-center gap-2 px-3 text-[14px]",
-        ok ? "bg-[#eef0e9] text-[#3a4536]" : "bg-orange-50 text-[#c2410c]",
+        ok === true ? "bg-[#eef0e9] text-[#3a4536]" : ok === false ? "bg-orange-50 text-[#c2410c]" : "bg-stone-100 text-stone-600",
       )}
     >
-      {ok ? <DoneMark className="size-3.5 stroke-[#3a4536]" /> : <TriangleAlert className="size-3.5" aria-hidden />}
+      {ok === true && <DoneMark className="size-3.5 stroke-[#3a4536]" />}
+      {ok === false && <TriangleAlert className="size-3.5" aria-hidden />}
       {children}
     </li>
   )
@@ -704,7 +725,8 @@ export function ReviewStep({
   const [playing, setPlaying] = useState(false)
   const checks = recording.checks
   const short = recording.source === "camera" && recording.seconds < 45
-  const allGood = !checks || (checks.faceSeen && checks.voiceHeard && !short)
+  // A check that never ran isn't a complaint.
+  const allGood = !checks || (checks.faceSeen !== false && checks.voiceHeard !== false && !short)
 
   return (
     <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
@@ -743,8 +765,12 @@ export function ReviewStep({
         )}
         {checks ? (
           <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-            <Chip ok={checks.faceSeen}>{checks.faceSeen ? "Face clear" : "Face not seen"}</Chip>
-            <Chip ok={checks.voiceHeard}>{checks.voiceHeard ? "Voice clear" : "No voice heard"}</Chip>
+            <Chip ok={checks.faceSeen}>
+              {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}
+            </Chip>
+            <Chip ok={checks.voiceHeard}>
+              {checks.voiceHeard === true ? "Voice clear" : checks.voiceHeard === false ? "No voice heard" : "Voice not checked"}
+            </Chip>
             {short && <Chip ok={false}>Short. Aim for a minute</Chip>}
           </ul>
         ) : notice ? null : (

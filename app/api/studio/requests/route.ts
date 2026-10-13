@@ -1,5 +1,6 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
-import { bearerToken, verifyIdToken } from "@/lib/studio/verify-id-token"
+import { parseChecks } from "@/lib/studio/checks"
+import { bearerToken, verifyFailure, verifyIdToken } from "@/lib/studio/verify-id-token"
 
 const MAX_TEXT = 200
 
@@ -17,8 +18,10 @@ export async function POST(request: Request) {
   let user
   try {
     user = await verifyIdToken(token)
-  } catch {
-    return Response.json({ error: "Your sign-in expired. Sign in again, then retry." }, { status: 401 })
+  } catch (error) {
+    const failure = verifyFailure(error)
+    if ((error as { code?: string }).code !== "ERR_JWT_EXPIRED") console.error("verifyIdToken failed", error)
+    return Response.json({ error: failure.message }, { status: failure.status })
   }
 
   let body: Record<string, unknown>
@@ -45,7 +48,6 @@ export async function POST(request: Request) {
     return Response.json({ error: "Agree to the consent first." }, { status: 400 })
   }
 
-  const rawChecks = body.checks as Record<string, unknown> | undefined
   try {
     await sendStudioRequestEmail({
       uid: user.uid,
@@ -58,12 +60,7 @@ export async function POST(request: Request) {
       recordingPath,
       recordingSeconds: Math.max(0, Math.round(Number(body.recordingSeconds) || 0)),
       recordingSource: body.recordingSource === "upload" ? "upload" : "camera",
-      checks: rawChecks
-        ? {
-            faceSeen: rawChecks.faceSeen === true,
-            voiceHeard: rawChecks.voiceHeard === true,
-          }
-        : undefined,
+      checks: parseChecks(body.checks),
       consentAt,
     })
   } catch (error) {
