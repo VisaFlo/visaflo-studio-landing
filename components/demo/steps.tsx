@@ -146,7 +146,7 @@ export function FaceVoiceStep({
           <div className="relative flex h-[280px] items-center justify-center overflow-hidden bg-stone-100">
             {photo ? (
               <div className="relative h-full w-[158px]">
-                <Image src="/demo/presenter.jpg" alt="Your portrait photo" fill sizes="158px" className="object-cover" />
+                <Image src="/samples/alex-face.jpg" alt="Your portrait photo" fill sizes="158px" className="object-cover" />
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2.5 px-6 text-center text-stone-600">
@@ -166,7 +166,7 @@ export function FaceVoiceStep({
           <div className="mt-auto flex gap-2 p-3">
             {photo ? (
               <>
-                <span className="flex-1 self-center text-[13px] text-stone-600">portrait.jpg · 1080×1920</span>
+                <span className="flex-1 self-center text-[13px] text-stone-600">alex-photo.jpg · 1080×1920</span>
                 <TextLink onClick={onClearPhoto}>Retake</TextLink>
               </>
             ) : (
@@ -198,7 +198,7 @@ export function FaceVoiceStep({
             {rec !== "idle" && (
               <div className="absolute inset-y-0 left-1/2 w-[158px] -translate-x-1/2 overflow-hidden">
                 <Image
-                  src="/demo/presenter.jpg"
+                  src="/samples/alex-setup.jpeg"
                   alt={rec === "done" ? "Your portrait video" : ""}
                   fill
                   sizes="158px"
@@ -247,7 +247,7 @@ export function FaceVoiceStep({
             )}
             {rec === "done" && (
               <>
-                <span className="flex-1 self-center text-[13px] text-stone-600">portrait-video.mov · 0:30</span>
+                <span className="flex-1 self-center text-[13px] text-stone-600">alex-video.mov · 0:30</span>
                 <TextLink onClick={onClearVideo}>Redo</TextLink>
               </>
             )}
