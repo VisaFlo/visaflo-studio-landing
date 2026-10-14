@@ -114,12 +114,12 @@ export function CameraAllowStep({
 }
 
 // Without a file-upload fallback, the way out of a missing or blocked camera
-// is the phone: the same link works there and keeps their account.
+// is the phone: the same link works there, no account needed.
 function PhoneHint() {
   return (
     <p className="m-0 text-[14px] leading-[1.5] text-stone-600">
-      No camera on this computer? Open <span className="font-medium text-stone-950">studio.visaflo.ca/signin</span> on your
-      phone and sign in with the same email.
+      No camera on this computer? Open <span className="font-medium text-stone-950">studio.visaflo.ca/start</span> on your
+      phone instead.
     </p>
   )
 }

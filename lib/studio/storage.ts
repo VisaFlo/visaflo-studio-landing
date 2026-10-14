@@ -1,6 +1,6 @@
-// The studio/ objects as the admin routes see them. The server reads them
-// with the service account (lib/studio/admin-bucket.ts), never with a
-// person's token; the storage rules keep everyone else out.
+// The studio/ objects as the server sees them. It reads them (and writes
+// request.json) with the service account (lib/studio/admin-bucket.ts); the
+// storage rules let a browser do nothing but create a recording.
 import { BUCKET, PROJECT_ID } from "@/lib/studio/project"
 
 // Local QA: the same Storage emulator the browser uploads to (see
@@ -48,7 +48,7 @@ export function firstDownloadToken(meta: ObjectMeta): string | undefined {
 export type Listing = { prefixes: string[]; items: string[] }
 
 /**
- * What the admin routes need from the bucket. Every method throws a
+ * What the server routes need from the bucket. Every method throws a
  * StorageError carrying the HTTP status when Storage says no (404 for a
  * missing object).
  */
@@ -60,6 +60,8 @@ export type StudioBucket = {
   json: (objectName: string) => Promise<unknown>
   read: (objectName: string) => Promise<{ body: ReadableStream<Uint8Array>; contentType?: string; length?: number }>
   remove: (objectName: string) => Promise<void>
+  /** Creates the object; a 412 StorageError when it already exists, so nothing is ever overwritten. */
+  create: (objectName: string, body: string, contentType: string) => Promise<void>
 }
 
 // A link that opens the file for anyone holding the token, no header needed:

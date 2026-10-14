@@ -10,7 +10,7 @@ export const SUBJECT = "[VisaFlo Studio] New waitlist signup"
 // that brought them carries over so the sign-up is credited to it. Their
 // email stays out of the URL: page URLs go to GA and Mixpanel.
 export function recordLink(origin: string, attribution?: Attribution): string {
-  const url = new URL("/signin", origin)
+  const url = new URL("/start", origin)
   const touch = attribution?.last ?? attribution?.first
   for (const key of ATTRIBUTION_PARAMS) {
     if (touch?.[key]) url.searchParams.set(key, touch[key])

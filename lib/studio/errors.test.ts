@@ -91,23 +91,11 @@ describe("describeLoadError", () => {
 })
 
 describe("describeSubmitError", () => {
-  it("turns a refused request.json write into a sign-in hint", () => {
-    expect(describeSubmitError(firebaseError("storage/unauthorized"))).toBe("We couldn't save your request. Sign out and back in, then retry.")
-    expect(describeSubmitError(firebaseError("storage/unauthenticated"))).toBe("We couldn't save your request. Sign out and back in, then retry.")
-  })
-  it("sends a dead session back to sign-in rather than asking for a retry that can't work", () => {
-    expect(describeSubmitError(firebaseError("auth/user-token-expired"))).toBe("Your session is no longer valid. Sign out and sign in again.")
-    expect(describeSubmitError(firebaseError("auth/invalid-user-token"))).toBe("Your session is no longer valid. Sign out and sign in again.")
-  })
   it("tells a dropped connection apart", () => {
     expect(describeSubmitError(new TypeError("Load failed"))).toBe("No connection. Check your internet, then retry.")
-    expect(describeSubmitError(firebaseError("auth/network-request-failed"))).toBe("No connection. Check your internet, then retry.")
   })
-  it("never shows raw SDK text for anything else, but keeps the code to look up", () => {
-    expect(describeSubmitError(firebaseError("storage/quota-exceeded"))).toBe("We couldn't send your request (storage/quota-exceeded). Try again.")
-    expect(describeSubmitError(new Error("Firebase Storage: An unknown error occurred (storage/unknown)"))).toBe(
-      "We couldn't send your request. Try again.",
-    )
+  it("never shows raw text for anything else", () => {
+    expect(describeSubmitError(new Error("Something internal"))).toBe("We couldn't send your request. Try again.")
     expect(describeSubmitError(undefined)).toBe("We couldn't send your request. Try again.")
   })
 })
@@ -116,7 +104,7 @@ describe("uploadFailureReason", () => {
   it("calls only a retry-limit failure a connection problem", () => {
     expect(uploadFailureReason(firebaseError("storage/retry-limit-exceeded"))).toEqual({ reason: "network" })
   })
-  it("sends the person back to sign-in when the rules refused the file", () => {
+  it("tells the rules refusing the file apart", () => {
     expect(uploadFailureReason(firebaseError("storage/unauthorized"))).toEqual({ reason: "refused" })
     expect(uploadFailureReason(firebaseError("storage/unauthenticated"))).toEqual({ reason: "refused" })
   })

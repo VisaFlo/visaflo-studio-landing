@@ -1,25 +1,18 @@
 import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
 import { isPlainObject } from "@/lib/studio/checks"
-import { RECORDING_EXTENSIONS } from "@/lib/studio/project"
+import { RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
 import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
 import { consoleUrl, firstDownloadToken, mediaUrl, StorageError, type StudioBucket } from "@/lib/studio/storage"
 
-export type SubmissionRef = { uid: string; submissionId: string }
-
-// Both halves are single path segments (the same shape lib/studio/return-path.ts
-// accepts in /admin URLs), so nothing can point outside studio/.
-const SEGMENT = /^[\w-]+$/
-
-// "uid/submissionId" as the admin pages send it.
-export function parseSubmissionId(id: unknown): SubmissionRef | null {
-  if (typeof id !== "string") return null
-  const parts = id.split("/")
-  if (parts.length !== 2 || !parts.every((p) => SEGMENT.test(p))) return null
-  return { uid: parts[0], submissionId: parts[1] }
+// The submission id as the admin pages send it. Only the exact shape
+// newSubmissionId makes, so nothing can point outside studio/ (the same
+// shape lib/studio/return-path.ts accepts in /admin URLs).
+export function parseSubmissionId(id: unknown): string | null {
+  return typeof id === "string" && SUBMISSION_ID.test(id) ? id : null
 }
 
-export function submissionFolder(ref: SubmissionRef): string {
-  return `studio/${ref.uid}/${ref.submissionId}`
+export function submissionFolder(submissionId: string): string {
+  return `studio/${submissionId}`
 }
 
 const RECORDING = new RegExp(`/recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
@@ -29,23 +22,21 @@ export function recordingObject(items: string[]): string | undefined {
   return items.find((name) => RECORDING.test(name))
 }
 
-// What a downloaded recording is called: the person (name, else email, else
-// uid, each reduced to [a-z0-9-] so the header stays plain), the submission,
-// and the recording's own extension (mp4 when it has none). `ref` has been
-// through parseSubmissionId, so its halves are header-safe already.
-export function downloadName(who: Pick<RequestJson, "name" | "email">, ref: SubmissionRef, objectName: string): string {
+// What a downloaded recording is called: the person (name, else email, each
+// reduced to [a-z0-9-] so the header stays plain), the submission, and the
+// recording's own extension (mp4 when it has none). `submissionId` has been
+// through parseSubmissionId, so it is header-safe already.
+export function downloadName(who: Pick<RequestJson, "name" | "email">, submissionId: string, objectName: string): string {
   const slug = (value?: string) => (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-  const person = slug(who.name) || slug(who.email) || ref.uid || "recording"
+  const person = slug(who.name) || slug(who.email) || "recording"
   const ext = /\.(\w+)$/.exec(objectName)?.[1] ?? "mp4"
-  return `${person}-${ref.submissionId}.${ext}`
+  return `${person}-${submissionId}.${ext}`
 }
 
-async function readSubmission(bucket: StudioBucket, ref: SubmissionRef, items: string[]): Promise<Submission> {
-  const folder = submissionFolder(ref)
+async function readSubmission(bucket: StudioBucket, submissionId: string, items: string[]): Promise<Submission> {
+  const folder = submissionFolder(submissionId)
   const submission: Submission = {
-    id: `${ref.uid}/${ref.submissionId}`,
-    uid: ref.uid,
-    submissionId: ref.submissionId,
+    id: submissionId,
     status: "recorded",
     consoleUrl: consoleUrl(folder),
     problems: [],
@@ -97,6 +88,7 @@ async function readSubmission(bucket: StudioBucket, ref: SubmissionRef, items: s
     submission.email = details.email ?? submission.email
     submission.name = details.name
     submission.firm = details.firm
+    submission.uid = details.uid
     submission.topicTitle = details.topicTitle
     submission.seconds = details.recordingSeconds ?? submission.seconds
     submission.checks = details.checks
@@ -120,22 +112,21 @@ async function inBatches<T, R>(inputs: T[], size: number, work: (input: T) => Pr
 }
 
 // One submission for its own page; null when the folder has nothing in it.
-export async function loadSubmission(bucket: StudioBucket, ref: SubmissionRef): Promise<Submission | null> {
-  const { items } = await bucket.list(`${submissionFolder(ref)}/`)
+export async function loadSubmission(bucket: StudioBucket, submissionId: string): Promise<Submission | null> {
+  const { items } = await bucket.list(`${submissionFolder(submissionId)}/`)
   if (!items.length) return null
-  return readSubmission(bucket, ref, items)
+  return readSubmission(bucket, submissionId, items)
 }
 
-// Every studio/{uid}/{submissionId}/ folder, newest first.
+// Every studio/{submissionId}/ folder, newest first.
 export async function loadSubmissions(bucket: StudioBucket): Promise<Submission[]> {
-  const people = await bucket.list("studio/")
-  const folders = (await inBatches(people.prefixes, 10, (prefix) => bucket.list(prefix))).flatMap((l) => l.prefixes)
-  const refs = folders.flatMap((prefix) => {
-    const ref = parseSubmissionId(prefix.replace(/^studio\//, "").replace(/\/$/, ""))
-    if (!ref) console.error(`Skipping a folder that isn't studio/{uid}/{submissionId}/: ${prefix}`)
-    return ref ? [ref] : []
+  const { prefixes } = await bucket.list("studio/")
+  const ids = prefixes.flatMap((prefix) => {
+    const id = parseSubmissionId(prefix.replace(/^studio\//, "").replace(/\/$/, ""))
+    if (!id) console.error(`Skipping a folder that isn't studio/{submissionId}/: ${prefix}`)
+    return id ? [id] : []
   })
-  const submissions = await inBatches(refs, 10, async (ref) => readSubmission(bucket, ref, (await bucket.list(`${submissionFolder(ref)}/`)).items))
+  const submissions = await inBatches(ids, 10, async (id) => readSubmission(bucket, id, (await bucket.list(`${submissionFolder(id)}/`)).items))
   const at = (s: Submission) => s.requestedAt ?? s.recordedAt ?? ""
   return submissions.sort((a, b) => at(b).localeCompare(at(a)))
 }

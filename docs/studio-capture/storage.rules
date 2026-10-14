@@ -18,14 +18,31 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
-    // VisaFlo Studio (studio.visaflo.ca): a signed-in person uploads the face
-    // and voice recording for their sample video, plus a small request.json,
-    // into their own folder. Write-only for them; no browser token can list,
-    // read or delete anything under studio/. The admin pages
-    // (studio.visaflo.ca/admin) go through the server, which checks the
-    // caller's VisaFlo master flag and then uses its service account (that
-    // bypasses these rules). The admin player streams through download-token
-    // links, which these rules don't gate either.
+    // VisaFlo Studio (studio.visaflo.ca/start): anyone, no sign-in, uploads
+    // the face and voice recording for their sample video into a new
+    // studio/{submissionId}/ folder. Create only: no overwriting, and no
+    // browser can list, read or delete anything under studio/. The server
+    // writes request.json next to it and emails the team
+    // (app/api/studio/requests); the admin pages (studio.visaflo.ca/admin)
+    // go through the server too, which checks the caller's VisaFlo master
+    // flag and then uses its service account (that bypasses these rules).
+    // The admin player streams through download-token links, which these
+    // rules don't gate either. The id pattern is SUBMISSION_ID in
+    // lib/studio/project.ts.
+    match /studio/{submissionId}/{fileName} {
+      // resource == null: "create" alone doesn't stop an overwrite (the
+      // emulator lets one through), so say it outright.
+      allow create: if resource == null
+                    && submissionId.matches('[0-9]{8}T[0-9]{6}-[0-9a-f]{8}')
+                    && fileName.matches('recording[.](mp4|webm|mov|m4v)')
+                    && request.resource.size < 500 * 1024 * 1024
+                    && request.resource.contentType.matches('video/.*');
+    }
+
+    // Before /start dropped sign-in (2026-10): a signed-in person's own
+    // studio/{uid}/{submissionId}/ folder. Kept only for a page opened before
+    // that release; remove once scripts/migrate-studio-paths.mjs has moved the
+    // last of these folders.
     match /studio/{uid}/{submissionId}/{fileName} {
       allow create, update: if request.auth != null
                             && request.auth.uid == uid

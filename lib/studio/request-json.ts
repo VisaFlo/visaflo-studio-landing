@@ -1,8 +1,9 @@
 import { isPlainObject, parseChecks, type RecordingChecks } from "@/lib/studio/checks"
 
-// request.json is written by the person's own browser under their own uid
-// (lib/studio/upload.ts), and the same fields arrive in the body of
-// POST /api/studio/requests. Both are read field by field here, never cast:
+// The fields of POST /api/studio/requests arrive from a browser nobody signed
+// into, and the server keeps them as request.json next to the recording
+// (older ones were written by the person's own browser). Both are read field
+// by field here, never cast:
 // a wrong type or an oversized value must not break the admin page or the
 // team email for that submission.
 
@@ -59,7 +60,12 @@ export function seconds(value: unknown): number | undefined {
 
 export type RequestJson = {
   email?: string
+  /** "First Last"; older request.json files have only this, newer ones both halves too. */
   name?: string
+  firstName?: string
+  lastName?: string
+  /** The VisaFlo account of a request from before /start dropped sign-in. */
+  uid?: string
   firm?: string
   topicTitle?: string
   recordingSeconds?: number
@@ -69,6 +75,10 @@ export type RequestJson = {
   createdAt?: string
 }
 
+export function fullName(firstName?: string, lastName?: string): string | undefined {
+  return [firstName, lastName].filter(Boolean).join(" ") || undefined
+}
+
 export function readRequestJson(raw: unknown): RequestJson {
   if (!isPlainObject(raw)) return {}
   const out: RequestJson = {}
@@ -76,7 +86,10 @@ export function readRequestJson(raw: unknown): RequestJson {
     if (value !== undefined) out[key] = value
   }
   put("email", asEmail(raw.email))
-  put("name", text(raw.name))
+  put("firstName", text(raw.firstName))
+  put("lastName", text(raw.lastName))
+  put("name", text(raw.name) ?? fullName(out.firstName, out.lastName))
+  put("uid", text(raw.uid))
   put("firm", text(raw.firm))
   put("topicTitle", text(raw.topicTitle, LIMITS.topicTitle))
   put("recordingSeconds", seconds(raw.recordingSeconds))

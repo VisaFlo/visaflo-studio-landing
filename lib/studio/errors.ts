@@ -59,7 +59,7 @@ const deadSession = (error: unknown) => {
 
 const DEAD_SESSION = "Your session is no longer valid. Sign out and sign in again."
 
-// Loading an admin page.
+// Loading an admin page (the only place anyone signs in).
 export function describeLoadError(error: unknown): string {
   if (offline(error)) return "No connection. Check your internet, then reload."
   if (deadSession(error)) return DEAD_SESSION
@@ -68,16 +68,18 @@ export function describeLoadError(error: unknown): string {
   return what ? `Something went wrong (${what}). Reload to try again.` : "Something went wrong. Reload to try again."
 }
 
-// Sending the sample request (request.json upload, then the API call).
+// Sending the sample request (the API call; the server answers with an
+// ApiError, shown as is, so this is only for a request that got no answer).
 export function describeSubmitError(error: unknown): string {
-  const c = code(error)
-  if (c === "storage/unauthorized" || c === "storage/unauthenticated") return "We couldn't save your request. Sign out and back in, then retry."
-  if (deadSession(error)) return DEAD_SESSION
   if (offline(error)) return "No connection. Check your internet, then retry."
-  return typeof c === "string" ? `We couldn't send your request (${c}). Try again.` : "We couldn't send your request. Try again."
+  return "We couldn't send your request. Try again."
 }
 
-/** Why the recording upload failed, for the banner: only a retry-limit failure is called a connection problem. */
+/**
+ * Why the recording upload failed, for the banner: only a retry-limit failure
+ * is called a connection problem. "refused" is the storage rules saying no
+ * (an over-size file, or rules not matching this page's build).
+ */
 export type UploadFailure = { reason: "network" } | { reason: "refused" } | { reason: "other"; code: string }
 
 export function uploadFailureReason(error: unknown): UploadFailure {

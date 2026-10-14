@@ -15,6 +15,8 @@ export type Bucket = {
   media?: Record<string, unknown>
   /** What deleting an object does, by object name: a status to fail with. Unlisted names delete fine. */
   deletes?: Record<string, number>
+  /** What creating an object does, by object name: a status to fail with. Unlisted names are created fine. */
+  creates?: Record<string, number>
 }
 
 const refuse = (status: number, what: string) => new StorageError(status, `status ${status} for ${what}`)
@@ -50,6 +52,10 @@ export function fakeBucket(bucket: Bucket) {
     }),
     remove: vi.fn<StudioBucket["remove"]>(async (name) => {
       const status = bucket.deletes?.[name]
+      if (status !== undefined) throw refuse(status, name)
+    }),
+    create: vi.fn<StudioBucket["create"]>(async (name) => {
+      const status = bucket.creates?.[name]
       if (status !== undefined) throw refuse(status, name)
     }),
   } satisfies StudioBucket

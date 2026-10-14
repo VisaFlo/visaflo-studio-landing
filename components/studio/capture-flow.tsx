@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { Lightbulb, Monitor, Image as ImageIcon, VolumeX, TriangleAlert } from "lucide-react"
-import type { User } from "firebase/auth"
 
 import { AlignStep, CameraAllowStep, CameraBlockedStep, FaceWatch, ReviewStep, ScriptStep, type ReviewNotice } from "@/components/studio/capture-steps"
 import {
@@ -19,12 +17,12 @@ import {
   QuietButton,
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
-import { signOutOfStudio, useStudioUser } from "@/lib/studio/auth"
 import { faceVerdict, markPlayable, RECOVERED_CHECKS, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { ApiError, describeSubmitError, uploadFailureReason, type UploadFailure } from "@/lib/studio/errors"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
-import { initials, loadProfile, saveProfile, type StudioProfile } from "@/lib/studio/profile"
+import { EMPTY_PROFILE, loadProfile, profileComplete, saveProfile, type StudioProfile } from "@/lib/studio/profile"
+import { asEmail, fullName } from "@/lib/studio/request-json"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording, type StoppedTake } from "@/lib/studio/recorder"
 import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
 import {
@@ -62,10 +60,8 @@ const CUT_OFF_NOTICE: ReviewNotice = {
 }
 
 export function CaptureFlow() {
-  const router = useRouter()
-  const user = useStudioUser()
   const [step, setStep] = useState<Step>("loading")
-  const [profile, setProfile] = useState<StudioProfile>({ name: "", firm: "" })
+  const [profile, setProfile] = useState<StudioProfile>(EMPTY_PROFILE)
   const [sent, setSent] = useState<SentRequest | null>(null)
 
   // What gets previewed and recorded: the vertical crop of the camera.
@@ -91,7 +87,6 @@ export function CaptureFlow() {
   // the readings while recording, which decide the recording's face check.
   const alignFaceSeen = useRef<Check>(null)
   const faceFrames = useRef({ total: 0, found: 0 })
-  const [signOutError, setSignOutError] = useState<string | null>(null)
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
@@ -110,25 +105,22 @@ export function CaptureFlow() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
-  // Signed out: back to sign in. Signed in: load what we know about them.
+  // What this browser knows about them: who they said they are, a request
+  // already sent, a take left from last time.
   useEffect(() => {
-    if (user === null) {
-      router.replace("/signin")
-      return
-    }
-    if (!user) return
     let cancelled = false
-    void Promise.all([loadProfile(user.uid), loadTake(user.uid)])
-      .then(([loaded, saved]) => {
+    void loadTake()
+      .then((saved) => {
         if (cancelled) return
-        const next = { name: loaded.name ?? "", firm: loaded.firm ?? "" }
+        const next = loadProfile()
+        const complete = profileComplete(next)
         setProfile(next)
-        const previous = lastSent(user.uid)
+        const previous = lastSent()
         setSent(previous)
-        identify((user.email ?? "").toLowerCase(), next)
+        if (complete) identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
         // A take left from a reload or a closed tab: pick up at review rather
         // than making them record again.
-        if (!previous && saved && next.name && next.firm) {
+        if (!previous && saved && complete) {
           const { take: stored, blob, chunks } = saved
           setRecording({
             blob,
@@ -150,7 +142,7 @@ export function CaptureFlow() {
           setStep("review")
           return
         }
-        setStep(previous ? "done" : next.name && next.firm ? "setup" : "about")
+        setStep(previous ? "done" : complete ? "setup" : "about")
       })
       .catch((error: unknown) => {
         // Never leave the page on "Loading…": without a profile, start at the top.
@@ -160,7 +152,7 @@ export function CaptureFlow() {
     return () => {
       cancelled = true
     }
-  }, [user, router])
+  }, [])
 
   useEffect(() => {
     if (step !== "loading") track("studio_step", { step })
@@ -221,13 +213,13 @@ export function CaptureFlow() {
       if (active) {
         take.current += 1
         active.cancel()
-        if (user) void clearTake(user.uid)
+        void clearTake()
       }
       stopCamera()
       setCameraError(reason)
       setStep("camera")
     },
-    [stopCamera, user],
+    [stopCamera],
   )
 
   async function openCamera() {
@@ -277,12 +269,8 @@ export function CaptureFlow() {
 
   // Every take is saved chunk by chunk as it records (see take-store).
   function recordTake(media: MediaStream): ActiveRecorder {
-    // The align step only renders with a user; a take without one would leave
-    // Finish dead, so fail loudly into beginScript's catch instead.
-    if (!user) throw new Error("No signed-in user to record for")
     const takeId = crypto.randomUUID()
     void beginTake({
-      uid: user.uid,
       takeId,
       mime: pickRecordingMime() ?? "video/webm",
       source: "camera",
@@ -338,7 +326,7 @@ export function CaptureFlow() {
     // since take.current has moved on.
     finishing.current?.cancel()
     finishing.current = null
-    if (user) void clearTake(user.uid)
+    void clearTake()
     // A camera that died during that Finish was only noted: say so now
     // rather than frame the person over its dead tracks.
     const lost = cameraLost.current
@@ -384,7 +372,7 @@ export function CaptureFlow() {
     stopCamera()
     setCameraError(null)
     const checks: RecordingChecks = { faceSeen: faceVerdict(faceFrames.current, alignFaceSeen.current), voiceHeard: result.voiceHeard }
-    if (user) void finishTake(user.uid, { seconds: result.seconds, checks, cutOff: result.cutOff })
+    void finishTake({ seconds: result.seconds, checks, cutOff: result.cutOff })
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
       return {
@@ -399,13 +387,13 @@ export function CaptureFlow() {
     setReviewError(null)
     setReviewNotice(result.cutOff ? CUT_OFF_NOTICE : null)
     setStep("review")
-  }, [abandonCamera, stopCamera, user])
+  }, [abandonCamera, stopCamera])
 
-  function startUpload(current: User, rec: Recording) {
+  function startUpload(rec: Recording) {
     upload.current?.cancel()
     submissionId.current ??= newSubmissionId()
     setUploadState({ status: "uploading", progress: 0 })
-    const handle = uploadRecording(current, submissionId.current, rec, (progress) =>
+    const handle = uploadRecording(profile.email, submissionId.current, rec, (progress) =>
       setUploadState((s) => (s.status === "uploading" ? { status: "uploading", progress } : s)),
     )
     upload.current = handle
@@ -419,7 +407,7 @@ export function CaptureFlow() {
   }
 
   function submitRecording() {
-    if (!user || !recording) return
+    if (!recording) return
     if (recording.blob.size === 0) {
       setReviewError("This recording is empty. Record again.")
       return
@@ -431,7 +419,7 @@ export function CaptureFlow() {
     setConsentAt(new Date().toISOString())
     // A new recording is a new submission.
     submissionId.current = null
-    startUpload(user, recording)
+    startUpload(recording)
     track("studio_recording_submitted", { source: recording.source, seconds: recording.seconds })
     setStep("topic")
   }
@@ -443,7 +431,7 @@ export function CaptureFlow() {
   // request goes out the moment the file is in. Everything it sends is read
   // here, once, so changing the topic mid-wait can't send a second request.
   async function makeSample() {
-    if (!topicTitle || !user || !recording || !upload.current || sending) return
+    if (!topicTitle || !recording || !upload.current || sending) return
     const handle = upload.current
     const request = {
       submissionId: submissionId.current ?? "",
@@ -451,7 +439,9 @@ export function CaptureFlow() {
       recordingSeconds: recording.seconds,
       recordingSource: recording.source,
       checks: recording.checks,
-      name: profile.name,
+      email: profile.email,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
       firm: profile.firm,
       topicId: topicId ?? "",
       topicTitle,
@@ -468,10 +458,10 @@ export function CaptureFlow() {
       return
     }
     try {
-      await submitSampleRequest(user, request)
+      await submitSampleRequest(request)
       const record = { topicTitle: request.topicTitle, at: new Date().toISOString() }
-      rememberSent(user.uid, record)
-      void clearTake(user.uid)
+      rememberSent(record)
+      void clearTake()
       setSent(record)
       track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
       setStep("done")
@@ -487,7 +477,7 @@ export function CaptureFlow() {
 
   function startAnother() {
     upload.current?.cancel()
-    if (user) void clearTake(user.uid)
+    void clearTake()
     setRecording((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
       return null
@@ -501,42 +491,10 @@ export function CaptureFlow() {
     setStep("setup")
   }
 
-  async function signOut() {
-    setSignOutError(null)
-    stopCamera()
-    // Don't leave a recording of their face on a shared computer; but a
-    // failure to clear it must not keep them signed in.
-    if (user) await clearTake(user.uid).catch((error: unknown) => console.warn("Couldn't clear the saved take before sign-out", error))
-    try {
-      await signOutOfStudio()
-    } catch (error) {
-      console.error("Sign-out failed", error)
-      setSignOutError("We couldn't sign you out. Reload the page and try again.")
-      return
-    }
-    router.replace("/signin")
-  }
+  const name = fullName(profile.firstName, profile.lastName) ?? ""
+  const lines = useMemo(() => scriptLines(name, profile.firm), [name, profile.firm])
 
-  const lines = useMemo(() => scriptLines(profile.name, profile.firm), [profile.name, profile.firm])
-
-  const email = user?.email ?? ""
-  const account = (
-    <>
-      <AccountHeader
-        name={profile.name}
-        email={email}
-        initials={initials(profile.name, email)}
-        onSignOut={() => void signOut()}
-      />
-      {signOutError && (
-        <div className="mx-auto w-full max-w-[1120px] px-(--page-pad) pt-3">
-          <ErrorText>{signOutError}</ErrorText>
-        </div>
-      )}
-    </>
-  )
-
-  if (step === "loading" || !user) {
+  if (step === "loading") {
     return (
       <Page>
         <AccountHeader />
@@ -549,13 +507,13 @@ export function CaptureFlow() {
     <Page>
       {step === "about" && (
         <>
-          {account}
+          <AccountHeader />
           <AboutStep
             initial={profile}
             onContinue={(next) => {
-              saveProfile(user.uid, next)
+              saveProfile(next)
               setProfile(next)
-              identify(email.toLowerCase(), next)
+              identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
               setStep("setup")
             }}
           />
@@ -564,7 +522,7 @@ export function CaptureFlow() {
 
       {step === "setup" && (
         <>
-          {account}
+          <AccountHeader />
           <SetupStep
             firm={profile.firm}
             onStart={() => setStep(stream ? "align" : "camera")}
@@ -648,10 +606,10 @@ export function CaptureFlow() {
 
       {step === "topic" && (
         <>
-          {account}
+          <AccountHeader />
           <UploadBanner
             state={uploadState}
-            onRetry={() => recording && startUpload(user, recording)}
+            onRetry={() => recording && startUpload(recording)}
           />
           <TopicStep
             topicId={topicId}
@@ -669,8 +627,8 @@ export function CaptureFlow() {
 
       {step === "done" && (
         <>
-          {account}
-          <DoneStep email={email} topicTitle={sent?.topicTitle ?? topicTitle} onAnother={startAnother} />
+          <AccountHeader />
+          <DoneStep email={profile.email} topicTitle={sent?.topicTitle ?? topicTitle} onAnother={startAnother} />
         </>
       )}
     </Page>
@@ -678,13 +636,23 @@ export function CaptureFlow() {
 }
 
 function AboutStep({ initial, onContinue }: { initial: StudioProfile; onContinue: (p: StudioProfile) => void }) {
-  const [name, setName] = useState(initial.name)
+  const [email, setEmail] = useState(initial.email)
+  const [firstName, setFirstName] = useState(initial.firstName)
+  const [lastName, setLastName] = useState(initial.lastName)
   const [firm, setFirm] = useState(initial.firm)
-  const ready = name.trim() && firm.trim()
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const ready = email.trim() && firstName.trim() && lastName.trim() && firm.trim()
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (ready) onContinue({ name: name.trim(), firm: firm.trim() })
+    if (!ready) return
+    // The same check the server makes, so a typo is caught here, not after recording.
+    const valid = asEmail(email)
+    if (!valid) {
+      setEmailError("Enter a valid email address. We send your sample there.")
+      return
+    }
+    onContinue({ email: valid, firstName: firstName.trim(), lastName: lastName.trim(), firm: firm.trim() })
   }
 
   return (
@@ -692,7 +660,25 @@ function AboutStep({ initial, onContinue }: { initial: StudioProfile; onContinue
       <Display>About you</Display>
       <form onSubmit={submit} className="flex flex-col gap-8">
         <div className="flex flex-col gap-6">
-          <Field id="name" label="Full name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="flex flex-col gap-2">
+            <Field
+              id="email"
+              label="Email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@firm.com"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                setEmailError(null)
+              }}
+            />
+            {emailError && <ErrorText>{emailError}</ErrorText>}
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6">
+            <Field id="first-name" label="First name" autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <Field id="last-name" label="Last name" autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          </div>
           <Field
             id="firm"
             label="Firm name"
@@ -731,7 +717,7 @@ function SetupStep({ firm, onStart, onEditProfile }: { firm: string; onStart: ()
             <button
               type="button"
               onClick={onEditProfile}
-              title="Edit your name and firm"
+              title="Edit your details"
               className="self-start bg-stone-950 px-1.5 py-0.5 font-mono text-[12px] font-bold tracking-[0.1em] text-white uppercase"
             >
               {firm}
@@ -793,9 +779,7 @@ function UploadBanner({ state, onRetry }: { state: UploadState; onRetry: () => v
             {state.reason === "refused" ? (
               <span className="flex-grow">
                 <span className="font-medium">We couldn&apos;t save your recording.</span>{" "}
-                <span className="text-stone-600">
-                  Sign out and back in, then retry. Still stuck? Email info@vflo.app.
-                </span>
+                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
               </span>
             ) : state.reason === "other" ? (
               <span className="flex-grow">

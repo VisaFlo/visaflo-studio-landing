@@ -85,7 +85,7 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
       </td>
       <td className="max-w-[320px] py-3 pr-4">
         <Link href={href} className="block">
-          <span className="block truncate text-[15px] font-medium">{[s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.uid}</span>
+          <span className="block truncate text-[15px] font-medium">{[s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.id}</span>
           {(s.name || s.firm) && <span className="block truncate text-[13px] text-stone-600">{s.email}</span>}
         </Link>
       </td>

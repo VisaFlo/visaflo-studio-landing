@@ -14,3 +14,9 @@ export const FIRESTORE_DATABASE_ID = "ca-dryrun"
 // repeats this list by hand; change both.
 export const RECORDING_EXTENSIONS = ["mp4", "webm", "mov", "m4v"] as const
 export type RecordingExtension = (typeof RECORDING_EXTENSIONS)[number]
+
+// A submission's folder name, studio/{submissionId}/, as newSubmissionId in
+// lib/studio/upload.ts makes it: the UTC time to the second, then 8 hex
+// characters. docs/studio-capture/storage.rules repeats this pattern; change
+// both.
+export const SUBMISSION_ID = /^\d{8}T\d{6}-[0-9a-f]{8}$/

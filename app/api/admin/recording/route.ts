@@ -5,16 +5,15 @@ import { StorageError } from "@/lib/studio/storage"
 import { downloadName, parseSubmissionId, recordingObject, submissionFolder } from "@/lib/studio/submissions"
 
 // One submission's original recording as a file download
-// (?id=uid/submissionId). The bytes stream through here because the bucket
+// (?id=submissionId). The bytes stream through here because the bucket
 // serves them inline and a cross-origin link can't force a download.
 export async function GET(request: Request) {
   const admin = await requireAdmin(request)
   if (admin instanceof Response) return admin
 
-  const ref = parseSubmissionId(new URL(request.url).searchParams.get("id"))
-  if (!ref) return Response.json({ error: "Unknown submission." }, { status: 400 })
-  const folder = submissionFolder(ref)
-  const who = `${ref.uid}/${ref.submissionId}`
+  const who = parseSubmissionId(new URL(request.url).searchParams.get("id"))
+  if (!who) return Response.json({ error: "Unknown submission." }, { status: 400 })
+  const folder = submissionFolder(who)
 
   try {
     const { items } = await admin.bucket.list(`${folder}/`)
@@ -22,7 +21,7 @@ export async function GET(request: Request) {
     if (!recording) return Response.json({ error: "No recording in that folder." }, { status: 404 })
 
     // The name only decides the file name, so a missing or broken
-    // request.json falls back to the uid; a refused read still fails the
+    // request.json falls back to "recording"; a refused read still fails the
     // whole download (it would fail the bytes too).
     const details = await admin.bucket
       .json(`${folder}/request.json`)
@@ -36,7 +35,7 @@ export async function GET(request: Request) {
     const media = await admin.bucket.read(recording)
     const headers = new Headers({
       "Content-Type": media.contentType ?? "video/mp4",
-      "Content-Disposition": `attachment; filename="${downloadName(details, ref, recording)}"`,
+      "Content-Disposition": `attachment; filename="${downloadName(details, who, recording)}"`,
       "Cache-Control": "private, no-store",
     })
     if (media.length !== undefined) headers.set("Content-Length", String(media.length))

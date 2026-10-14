@@ -6,10 +6,10 @@ export type SubmissionProblem = {
 }
 
 export type Submission = {
-  /** `{uid}/{submissionId}`, the folder under studio/. */
+  /** The submission id, the folder under studio/. */
   id: string
-  uid: string
-  submissionId: string
+  /** The VisaFlo account of a submission from before /start dropped sign-in. */
+  uid?: string
   /**
    * "requested": request.json was read and names a topic (the browser then
    * asks /api/studio/requests to email the team).

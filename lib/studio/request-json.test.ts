@@ -106,6 +106,12 @@ describe("readRequestJson", () => {
       consentAt: "2026-10-09T21:17:55.000Z",
     })
   })
+  it("joins first and last name when there is no full name, and keeps an older file's uid", () => {
+    expect(readRequestJson({ firstName: " Dan ", lastName: "Jeong" })).toStrictEqual({ firstName: "Dan", lastName: "Jeong", name: "Dan Jeong" })
+    expect(readRequestJson({ firstName: "Dan" }).name).toBe("Dan")
+    expect(readRequestJson({ name: "Daniel Jeong", firstName: "Dan" }).name).toBe("Daniel Jeong")
+    expect(readRequestJson({ uid: "Mi0wDogz" }).uid).toBe("Mi0wDogz")
+  })
   it("caps long text and survives a non-object", () => {
     expect(readRequestJson({ name: "x".repeat(300) }).name).toHaveLength(LIMITS.text)
     expect(readRequestJson({ topicTitle: "t".repeat(600) }).topicTitle).toHaveLength(LIMITS.topicTitle)
