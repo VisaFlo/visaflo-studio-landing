@@ -1,42 +1,31 @@
 "use client"
 
-import { doc, getDoc } from "firebase/firestore"
+// Who is recording, as they typed it on /start. Nobody signs in there, so
+// it lives in this browser only and is asked again on another device.
+export type StudioProfile = { email: string; firstName: string; lastName: string; firm: string }
 
-import { studioDb } from "@/lib/studio/firebase"
+const KEY = "vf_studio_profile"
 
-export type StudioProfile = { name: string; firm: string }
+export const EMPTY_PROFILE: StudioProfile = { email: "", firstName: "", lastName: "", firm: "" }
 
-const key = (uid: string) => `vf_studio_profile:${uid}`
-
-function readSaved(uid: string): Partial<StudioProfile> {
+export function loadProfile(): StudioProfile {
   try {
-    return JSON.parse(localStorage.getItem(key(uid)) ?? "{}") as Partial<StudioProfile>
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Record<keyof StudioProfile, unknown>>
+    const field = (value: unknown) => (typeof value === "string" ? value : "")
+    return { email: field(saved.email), firstName: field(saved.firstName), lastName: field(saved.lastName), firm: field(saved.firm) }
   } catch {
-    return {}
+    return EMPTY_PROFILE
   }
 }
 
-export function saveProfile(uid: string, profile: StudioProfile) {
+export function saveProfile(profile: StudioProfile) {
   try {
-    localStorage.setItem(key(uid), JSON.stringify(profile))
+    localStorage.setItem(KEY, JSON.stringify(profile))
   } catch {}
 }
 
-// Name and firm for the script and the request. What the person typed here
-// wins; otherwise a VisaFlo customer's name comes from their own users/{uid}
-// profile, which the Firestore rules let them read. The firm name lives on
-// the company document, which browsers can't read, so it is asked once.
-export async function loadProfile(uid: string): Promise<Partial<StudioProfile>> {
-  const saved = readSaved(uid)
-  if (saved.name && saved.firm) return saved
-  try {
-    const snap = await getDoc(doc(studioDb(), "users", uid))
-    const data = snap.data() as { firstName?: string; lastName?: string } | undefined
-    const name = [data?.firstName, data?.lastName].filter(Boolean).join(" ").trim()
-    return { name: saved.name || name || undefined, firm: saved.firm }
-  } catch {
-    return saved
-  }
+export function profileComplete(profile: StudioProfile): boolean {
+  return Boolean(profile.email && profile.firstName && profile.lastName && profile.firm)
 }
 
 export function initials(name: string, email: string): string {

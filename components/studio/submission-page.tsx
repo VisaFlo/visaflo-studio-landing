@@ -56,7 +56,7 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
   }
 
   const s = load.data
-  const title = [s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.uid
+  const title = [s.name, s.firm].filter(Boolean).join(" · ") || s.email || s.id
   // Checks travel in request.json, so only a finished request can be missing them.
   const flags = s.status === "requested" ? checkFlags(s.checks) : []
   const rows: [string, string][] = [
@@ -67,7 +67,8 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
     ["Length", clipLength(s.seconds)],
     ["File", fileInfo(s.recording)],
     ["Consent", s.consentAt ? `Agreed ${when(s.consentAt)}` : "—"],
-    ["Folder", `studio/${s.uid}/${s.submissionId}`],
+    ["Folder", `studio/${s.id}`],
+    ...(s.uid ? ([["VisaFlo uid", s.uid]] as [string, string][]) : []),
   ]
   const playerError = s.recording?.url !== undefined && s.recording.url === failedUrl
   const playable = s.recording?.url && !playerError

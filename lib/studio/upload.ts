@@ -1,19 +1,21 @@
 "use client"
 
-import type { User } from "firebase/auth"
-import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebase/storage"
+import { ref, uploadBytesResumable, type UploadTask } from "firebase/storage"
 
 import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
 import { extensionFor, type Recording } from "@/lib/studio/recorder"
 
-// Everything for one sample lives under studio/{uid}/{submissionId}/ in the
-// VisaFlo bucket. The storage rules let a signed-in person write only under
-// their own uid, and nobody read from a browser.
-export function submissionFolder(uid: string, submissionId: string): string {
-  return `studio/${uid}/${submissionId}`
+// Everything for one sample lives under studio/{submissionId}/ in the
+// VisaFlo bucket. Nobody signs in on /start: the storage rules let a browser
+// create the recording there and nothing else (no overwrite, no reading);
+// the server writes request.json next to it (app/api/studio/requests).
+export function submissionFolder(submissionId: string): string {
+  return `studio/${submissionId}`
 }
 
+// The UTC time to the second, then 8 hex characters: SUBMISSION_ID in
+// lib/studio/project.ts, which the rules and the server check.
 export function newSubmissionId(): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)
   return `${stamp}-${crypto.randomUUID().slice(0, 8)}`
@@ -26,16 +28,16 @@ export type UploadHandle = {
 }
 
 export function uploadRecording(
-  user: User,
+  email: string,
   submissionId: string,
   recording: Recording,
   onProgress: (fraction: number) => void,
 ): UploadHandle {
-  const path = `${submissionFolder(user.uid, submissionId)}/recording.${extensionFor(recording.mime)}`
+  const path = `${submissionFolder(submissionId)}/recording.${extensionFor(recording.mime)}`
   const task: UploadTask = uploadBytesResumable(ref(studioStorage(), path), recording.blob, {
     contentType: recording.mime.split(";")[0],
     customMetadata: {
-      email: user.email ?? "",
+      email,
       source: recording.source,
       seconds: String(recording.seconds),
     },
@@ -57,7 +59,9 @@ export type SampleRequest = {
   recordingSeconds: number
   recordingSource: Recording["source"]
   checks: Recording["checks"]
-  name: string
+  email: string
+  firstName: string
+  lastName: string
   firm: string
   topicId: string
   topicTitle: string
@@ -65,37 +69,30 @@ export type SampleRequest = {
   consentAt: string
 }
 
-// The request is kept next to the recording (so the bucket alone has the full
-// record) and sent to the team inbox through our API.
-export async function submitSampleRequest(user: User, request: SampleRequest): Promise<void> {
-  const json = JSON.stringify({ ...request, uid: user.uid, email: user.email, createdAt: new Date().toISOString() }, null, 2)
-  await uploadBytes(
-    ref(studioStorage(), `${submissionFolder(user.uid, request.submissionId)}/request.json`),
-    new Blob([json], { type: "application/json" }),
-    { contentType: "application/json" },
-  )
-
+// The server checks the recording is in the bucket, keeps the request as
+// request.json next to it and emails the team.
+export async function submitSampleRequest(request: SampleRequest): Promise<void> {
   const response = await fetch("/api/studio/requests", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await user.getIdToken()}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   })
   if (!response.ok) throw apiError("/api/studio/requests", response.status, await response.text())
 }
 
-const doneKey = (uid: string) => `vf_studio_request:${uid}`
+const DONE_KEY = "vf_studio_request"
 
 export type SentRequest = { topicTitle: string; at: string }
 
-export function rememberSent(uid: string, sent: SentRequest) {
+export function rememberSent(sent: SentRequest) {
   try {
-    localStorage.setItem(doneKey(uid), JSON.stringify(sent))
+    localStorage.setItem(DONE_KEY, JSON.stringify(sent))
   } catch {}
 }
 
-export function lastSent(uid: string): SentRequest | null {
+export function lastSent(): SentRequest | null {
   try {
-    return JSON.parse(localStorage.getItem(doneKey(uid)) ?? "null") as SentRequest | null
+    return JSON.parse(localStorage.getItem(DONE_KEY) ?? "null") as SentRequest | null
   } catch {
     return null
   }

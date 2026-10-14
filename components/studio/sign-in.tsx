@@ -22,7 +22,7 @@ type Mode = "sign-in" | "sign-up" | "code" | "reset-sent"
 
 // Admin pages send someone here and get them back after sign-in.
 function afterSignIn(): string {
-  return returnPath(new URLSearchParams(window.location.search).get("next"))
+  return returnPath(new URLSearchParams(window.location.search).get("next")) ?? "/admin"
 }
 
 export function SignIn() {

@@ -18,6 +18,8 @@ function fakeGcs(files: Record<string, { metadata?: Record<string, unknown>; bod
       download: vi.fn(() => (ok ? Promise.resolve([Buffer.from(entry.body ?? "")]) : fail())),
       createReadStream: vi.fn(() => Readable.from([Buffer.from(entry?.body ?? "")])),
       delete: vi.fn(() => (ok ? Promise.resolve([{}]) : fail())),
+      // An existing object fails the generation-0 precondition, as Storage does.
+      save: vi.fn(() => (entry ? Promise.reject(apiError(entry.fails ?? 412)) : Promise.resolve())),
     }
   })
   return { getFiles: pages, file } as unknown as GcsBucket & { file: typeof file; getFiles: ReturnType<typeof vi.fn> }
@@ -82,6 +84,17 @@ describe("gcsBucket", () => {
     await gcsBucket(gcs).remove("r.mp4")
     expect(gcs.file).toHaveBeenCalledWith("r.mp4")
     expect(gcs.file.mock.results[0].value.delete).toHaveBeenCalled()
+  })
+
+  it("creates an object only when it isn't there yet", async () => {
+    const gcs = fakeGcs({ "taken.json": {} })
+    await gcsBucket(gcs).create("new.json", "{}", "application/json")
+    expect(gcs.file.mock.results[0].value.save).toHaveBeenCalledWith("{}", {
+      contentType: "application/json",
+      resumable: false,
+      preconditionOpts: { ifGenerationMatch: 0 },
+    })
+    await expect(gcsBucket(gcs).create("taken.json", "{}", "application/json")).rejects.toMatchObject({ name: "StorageError", status: 412 })
   })
 
   it("turns an API error into a StorageError that keeps the status, and leaves other errors alone", async () => {

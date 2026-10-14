@@ -1,20 +1,13 @@
-# Studio sign-in and sample capture
+# Studio sample capture
 
-`/signin` and `/start` on studio.visaflo.ca let a firm sign in with their
-VisaFlo account (or create one), record their face and voice, pick a topic,
-and request a sample video.
+`/start` on studio.visaflo.ca lets a firm record their face and voice, pick a
+topic, and request a sample video. Nobody signs in: the person types their
+email, first and last name and firm name, which stay in that browser
+(`lib/studio/profile.ts`). Sign-in (`/signin`) is only for `/admin`; a plain
+`/signin` link (older emails) redirects to `/start`.
 
 ## How it fits together
 
-- **Accounts**: the VisaFlo production Firebase project (`devdashboard-c9159`),
-  email and password plus the authenticator-app code, exactly like
-  my.vflo.app. A VisaFlo customer signs in with the same email and password.
-  Someone who creates an account here can later sign in to my.vflo.app with it.
-  Sessions are per domain, so signing in on one site doesn't sign you in on
-  the other.
-- **Name**: read from the person's own `users/{uid}` document in the
-  `ca-dryrun` database (the Firestore rules already allow that read). The firm
-  name is asked once and kept in the browser.
 - **Recording**: one vertical MediaRecorder clip of the script being read
   (MP4 on Safari and new Chrome, WebM elsewhere). A phone held upright
   records as is, in the phone's own portrait aspect; a laptop webcam's 16:9
@@ -23,23 +16,28 @@ and request a sample video.
   runs the framing checks (face in the oval, distance, light) and starts the
   recording on a countdown; there is no head-turn step. If it can't load, the
   flow continues without live checks.
-- **Files**: uploaded straight from the browser to
-  `gs://devdashboard-c9159-ca/studio/{uid}/{submissionId}/`:
-  `recording.{mp4,webm}` and `request.json` (topic, name, firm, consent text
-  and time, live check results).
-- **Notification**: `POST /api/studio/requests` checks the Firebase ID token
-  against Google's public keys (no service account on Vercel), confirms the
-  file sits under that uid, and emails the team inbox
-  (`[VisaFlo Studio] New sample recording`) through the existing SendGrid key.
+- **Files**: the browser uploads `recording.{mp4,webm}` straight to
+  `gs://devdashboard-c9159-ca/studio/{submissionId}/` (the id is the UTC time
+  plus 8 hex characters, `SUBMISSION_ID` in `lib/studio/project.ts`). The
+  storage rules let a signed-out browser create that one file and nothing
+  else: no overwrite, no `request.json`, no reading, listing or deleting.
+- **Notification**: `POST /api/studio/requests` checks the recording is in
+  the bucket, writes `request.json` next to it with the service account
+  (email, first and last name, firm, topic, consent text and time, live check
+  results), and emails the team inbox (`[VisaFlo Studio] New sample
+  recording`, with a link to the submission in `/admin`) through the existing
+  SendGrid key. `request.json` is created only once, so a second send of the
+  same submission isn't mailed again; if the email fails, `request.json` is
+  removed so a retry sends it. The email is typed, never verified.
 
 - **Admin**: `/admin` lists every submission (when, who, topic, length,
   check flags), including people who recorded but never picked a topic,
   with a **Download recording** button on each row that has a recording.
-  A row opens its own page (`/admin/{uid}/{submissionId}`) with the
+  A row opens its own page (`/admin/{submissionId}`) with the
   recording playable, the consent text, the same download, and **Delete
   submission** (after a confirm, `DELETE /api/admin/submissions` removes
   every file in the folder for good and names any it couldn't). The file is
-  saved as `{name-or-email-or-uid}-{submissionId}.{ext}`
+  saved as `{name-or-email}-{submissionId}.{ext}`
   (`GET /api/admin/recording` streams it through the server, because the
   bucket serves it inline and a cross-origin link can't force a download).
   Anyone VisaFlo marked as a master gets in: `master: true` on their
@@ -51,11 +49,29 @@ and request a sample video.
   same account for the bucket, which bypasses the storage rules; no browser
   token can read `studio/`. Storage rules can't make that check themselves,
   since they only see the `(default)` Firestore database. `request.json` is
-  read field by field (`readRequestJson`), since the person's own browser
-  wrote it. Sample videos are made by hand from the downloaded recording;
+  read field by field (`readRequestJson`), since its fields came from a
+  browser nobody signed into (older ones were written by the browser itself
+  and carry the person's VisaFlo `uid`, shown on their page). Sample videos are made by hand from the downloaded recording;
   the automatic pipeline that used to run from this page was removed in
   commit `45e5725` (2026-10-10; the history before it has the Remotion
   composition that matched the landing samples' look).
+
+## Moving from studio/{uid}/{submissionId}/ (2026-10)
+
+Until 2026-10, `/start` needed a VisaFlo sign-in and kept each submission
+under the person's uid. `scripts/migrate-studio-paths.mjs` moves those
+folders to `studio/{submissionId}/` (copy, check md5 and size, then delete
+the original; safe to run again):
+
+```bash
+node --env-file=.env.local scripts/migrate-studio-paths.mjs           # dry run
+node --env-file=.env.local scripts/migrate-studio-paths.mjs --apply
+```
+
+Order: publish `storage.rules` (it keeps the old signed-in rule for pages
+opened before the release), deploy, run the script, and a few days later run
+it once more, then drop the old rule. `/admin` skips any folder that isn't a
+submission id, so an unmoved one is logged rather than shown broken.
 
 ## Before it works in production
 
@@ -64,7 +80,7 @@ and request a sample video.
    `private_key` of a `devdashboard-c9159` service account key (the
    `firebase-adminsdk` one has the Storage and Firestore access it needs).
    Paste the key as it appears in the JSON file, `\n`s and all. Without them
-   `/admin` says which variable is missing.
+   `/admin` and `POST /api/studio/requests` say which variable is missing.
 2. **Storage rules**: `storage.rules` from this folder is live on the
    `devdashboard-c9159-ca` bucket (published 2026-10-13, ruleset
    `28a27394…`; the one before it, with the admin read and write, was
@@ -72,7 +88,7 @@ and request a sample video.
    the live rules before publishing a change (they matched outside the
    studio blocks on 2026-10-13).
 3. Nothing else: the web API key accepts requests from studio.visaflo.ca, and
-   email and password sign-in doesn't need an authorized domain.
+   email and password sign-in (for `/admin`) doesn't need an authorized domain.
 
 ## Local QA without touching production
 
@@ -88,7 +104,7 @@ firebase emulators:start --only auth,storage,firestore --project demo-studio
 # Terminal 2: the app, pointed at the emulators (dev builds only)
 NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
 
-# Storage rules matrix (21 cases) against the running emulators
+# Storage rules matrix against the running emulators
 node docs/studio-capture/rules-test.mjs
 ```
 
@@ -98,9 +114,9 @@ its `users/{uid}` doc in the emulator's `ca-dryrun` database has
 `master: true`; the dev server's admin routes use the emulators, not the
 service account.
 
-To walk the flow with a real VisaFlo account without writing to production,
-set only `NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1`: sign-in and
-the name lookup use production, uploads go to the local Storage emulator.
+To try `/admin` with a real VisaFlo master account without touching
+production files, set only `NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1`:
+sign-in uses production, the bucket is the local Storage emulator.
 
 With `NEXT_PUBLIC_FIREBASE_EMULATOR_HOST` set (ignored in production builds)
 the app uses a `demo-studio` project id, so a missed emulator hookup fails

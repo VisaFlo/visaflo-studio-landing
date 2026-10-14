@@ -3,7 +3,7 @@ import { Readable } from "node:stream"
 import { StorageError, type Listing, type ObjectMeta, type StudioBucket } from "@/lib/studio/storage"
 
 // The slice of @google-cloud/storage's Bucket (what firebase-admin's
-// getStorage().bucket() returns) that the admin routes use, so the adapter
+// getStorage().bucket() returns) that the server routes use, so the adapter
 // can be tested without a bucket.
 type GcsMetadata = {
   name?: string
@@ -17,6 +17,10 @@ type GcsFile = {
   download: () => Promise<[Buffer]>
   createReadStream: () => Readable
   delete: () => Promise<unknown>
+  save: (
+    data: string,
+    options: { contentType: string; resumable: false; preconditionOpts: { ifGenerationMatch: 0 } },
+  ) => Promise<unknown>
 }
 export type GcsBucket = {
   getFiles: (query: {
@@ -91,6 +95,13 @@ export function gcsBucket(bucket: GcsBucket): StudioBucket {
     },
     async remove(objectName) {
       await call(`delete ${objectName}`, () => bucket.file(objectName).delete())
+    },
+    // Generation 0 means "only if there is no such object yet": Storage
+    // answers 412 instead of replacing one.
+    async create(objectName, body, contentType) {
+      await call(`create ${objectName}`, () =>
+        bucket.file(objectName).save(body, { contentType, resumable: false, preconditionOpts: { ifGenerationMatch: 0 } }),
+      )
     },
   }
 }

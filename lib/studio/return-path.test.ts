@@ -5,18 +5,20 @@ import { returnPath } from "@/lib/studio/return-path"
 describe("returnPath", () => {
   it("sends admin pages back where they came from", () => {
     expect(returnPath("/admin")).toBe("/admin")
-    expect(returnPath("/admin/abc123/20261009T120000-1a2b3c4d")).toBe("/admin/abc123/20261009T120000-1a2b3c4d")
+    expect(returnPath("/admin/20261009T120000-1a2b3c4d")).toBe("/admin/20261009T120000-1a2b3c4d")
   })
-  it("falls back to /start for anything else", () => {
-    expect(returnPath(null)).toBe("/start")
-    expect(returnPath("")).toBe("/start")
-    expect(returnPath("https://evil.example/admin")).toBe("/start")
-    expect(returnPath("//evil.example")).toBe("/start")
-    expect(returnPath("/admin/../x")).toBe("/start")
-    expect(returnPath("/settings")).toBe("/start")
+  it("has nowhere to return to for anything else", () => {
+    expect(returnPath(null)).toBeNull()
+    expect(returnPath(undefined)).toBeNull()
+    expect(returnPath("")).toBeNull()
+    expect(returnPath(["/admin"])).toBeNull()
+    expect(returnPath("https://evil.example/admin")).toBeNull()
+    expect(returnPath("//evil.example")).toBeNull()
+    expect(returnPath("/admin/../x")).toBeNull()
+    expect(returnPath("/settings")).toBeNull()
     // Not a loose prefix match either.
-    expect(returnPath("/adminx")).toBe("/start")
-    expect(returnPath("/admin?next=x")).toBe("/start")
-    expect(returnPath("/ADMIN")).toBe("/start")
+    expect(returnPath("/adminx")).toBeNull()
+    expect(returnPath("/admin?next=x")).toBeNull()
+    expect(returnPath("/ADMIN")).toBeNull()
   })
 })

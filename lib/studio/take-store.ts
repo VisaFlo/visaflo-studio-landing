@@ -2,7 +2,7 @@
 
 // Keeps the current take in IndexedDB while it records (one-second chunks),
 // so a reload, a closed tab or a crashed browser doesn't throw away a minute
-// of reading. One take per account; it's cleared once the request is sent or
+// of reading. One take per browser; it's cleared once the request is sent or
 // the person starts over.
 
 import type { RecordingChecks } from "@/lib/studio/checks"
@@ -12,6 +12,7 @@ const TAKES = "takes"
 const CHUNKS = "chunks"
 
 export type StoredTake = {
+  /** The store's key: OWNER. (It was the account's uid while /start needed sign-in.) */
   uid: string
   takeId: string
   mime: string
@@ -25,6 +26,9 @@ export type StoredTake = {
    */
   finished?: { seconds: number; checks: RecordingChecks; cutOff?: boolean }
 }
+
+// Nobody signs in on /start, so the one take kept is this browser's.
+const OWNER = "device"
 
 let opening: Promise<IDBDatabase> | null = null
 
@@ -66,9 +70,9 @@ function quietly<T>(promise: Promise<T>): Promise<T | undefined> {
   })
 }
 
-export function beginTake(take: StoredTake): Promise<unknown> {
+export function beginTake(take: Omit<StoredTake, "uid">): Promise<unknown> {
   return quietly(
-    clearTake(take.uid).then(() => run([TAKES], "readwrite", (tx) => tx.objectStore(TAKES).put(take))),
+    clearTake().then(() => run([TAKES], "readwrite", (tx) => tx.objectStore(TAKES).put({ ...take, uid: OWNER }))),
   )
 }
 
@@ -76,16 +80,16 @@ export function saveChunk(takeId: string, index: number, chunk: Blob): Promise<u
   return quietly(run([CHUNKS], "readwrite", (tx) => tx.objectStore(CHUNKS).put(chunk, [takeId, index])))
 }
 
-export function finishTake(uid: string, finished: NonNullable<StoredTake["finished"]>): Promise<unknown> {
+export function finishTake(finished: NonNullable<StoredTake["finished"]>): Promise<unknown> {
   return quietly(
-    run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(uid)).then((take) =>
+    run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(OWNER)).then((take) =>
       take ? run([TAKES], "readwrite", (tx) => tx.objectStore(TAKES).put({ ...take, finished })) : undefined,
     ),
   )
 }
 
-export async function loadTake(uid: string): Promise<{ take: StoredTake; blob: Blob; chunks: number } | null> {
-  const take = await quietly(run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(uid)))
+export async function loadTake(): Promise<{ take: StoredTake; blob: Blob; chunks: number } | null> {
+  const take = await quietly(run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(OWNER)))
   if (!take) return null
   const range = IDBKeyRange.bound([take.takeId, 0], [take.takeId, Number.MAX_SAFE_INTEGER])
   const chunks = await quietly(run<Blob[]>([CHUNKS], "readonly", (tx) => tx.objectStore(CHUNKS).getAll(range)))
@@ -93,14 +97,14 @@ export async function loadTake(uid: string): Promise<{ take: StoredTake; blob: B
   return { take, blob: new Blob(chunks, { type: take.mime }), chunks: chunks.length }
 }
 
-export async function clearTake(uid: string): Promise<void> {
-  const take = await quietly(run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(uid)))
+export async function clearTake(): Promise<void> {
+  const take = await quietly(run<StoredTake>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(OWNER)))
   if (!take) return
   const range = IDBKeyRange.bound([take.takeId, 0], [take.takeId, Number.MAX_SAFE_INTEGER])
   await quietly(
     run([TAKES, CHUNKS], "readwrite", (tx) => {
       tx.objectStore(CHUNKS).delete(range)
-      tx.objectStore(TAKES).delete(uid)
+      tx.objectStore(TAKES).delete(OWNER)
     }),
   )
 }

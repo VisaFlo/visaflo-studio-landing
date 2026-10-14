@@ -10,18 +10,17 @@ vi.mock("@/lib/sendgrid", async (importOriginal) => ({
 
 const send = vi.mocked(sendMail)
 const ENTRY: StudioRequestMail = {
-  uid: "u1",
   email: "dan@firm.ca",
-  emailVerified: true,
-  name: "Dan",
+  name: "Dan Jeong",
   firm: "Firm",
   topicTitle: "Family",
-  submissionId: "s1",
-  recordingPath: "studio/u1/s1/recording.mp4",
+  submissionId: "20261009T211755-393dbaa7",
+  recordingPath: "studio/20261009T211755-393dbaa7/recording.mp4",
   recordingSeconds: 61,
   recordingSource: "camera",
   checks: { faceSeen: true, voiceHeard: null },
   consentAt: "2026-10-09T21:19:00.000Z",
+  adminUrl: "https://studio.visaflo.ca/admin/20261009T211755-393dbaa7",
 }
 const sent = () => send.mock.calls[0][0]
 
@@ -31,9 +30,9 @@ describe("sendStudioRequestEmail", () => {
   it("tells the team what the checks saw, with a reply-to for the person", async () => {
     await sendStudioRequestEmail(ENTRY)
     expect(sent().text).toContain("1:01 (camera), face seen, voice not checked")
-    expect(sent().replyTo).toEqual({ email: "dan@firm.ca", name: "Dan" })
-    expect(sent().text).toContain("gs://devdashboard-c9159-ca/studio/u1/s1/recording.mp4")
-    expect(sent().text).toContain("studio~2Fu1~2Fs1")
+    expect(sent().replyTo).toEqual({ email: "dan@firm.ca", name: "Dan Jeong" })
+    expect(sent().text).toContain("gs://devdashboard-c9159-ca/studio/20261009T211755-393dbaa7/recording.mp4")
+    expect(sent().text).toContain("Open it in Studio admin: https://studio.visaflo.ca/admin/20261009T211755-393dbaa7")
   })
 
   it("escapes what the person typed before it goes into the HTML", async () => {
@@ -54,14 +53,8 @@ describe("sendStudioRequestEmail", () => {
     expect(sent().text).not.toContain("0:00")
   })
 
-  it("leaves reply-to out and says so when the account has no email", async () => {
-    await sendStudioRequestEmail({ ...ENTRY, email: undefined })
-    expect(sent().replyTo).toBeUndefined()
-    expect(sent().text).toContain("no email on the account")
-  })
-
-  it("warns about an unverified address before the team uses the face", async () => {
-    await sendStudioRequestEmail({ ...ENTRY, emailVerified: false })
-    expect(sent().text).toContain("dan@firm.ca (not verified")
+  it("warns that the typed address isn't verified before the team uses the face", async () => {
+    await sendStudioRequestEmail(ENTRY)
+    expect(sent().text).toContain("dan@firm.ca (typed, not verified")
   })
 })

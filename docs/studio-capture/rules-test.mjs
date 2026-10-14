@@ -1,69 +1,63 @@
-// Storage rules matrix for studio/{uid}/... Run against the emulators; see README.md.
+// Storage rules matrix for studio/... Run against the emulators; see README.md.
 import { initializeApp, deleteApp } from "firebase/app"
-import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut } from "firebase/auth"
+import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth"
 import { getStorage, connectStorageEmulator, ref, uploadBytes, getBytes, list, deleteObject } from "firebase/storage"
 
 const app = initializeApp({ apiKey: "demo-key", projectId: "demo-studio", storageBucket: "devdashboard-c9159-ca", appId: "x" })
 const auth = getAuth(app); connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true })
 const st = getStorage(app); connectStorageEmulator(st, "127.0.0.1", 9199)
 const stamp = Date.now()
-const a = (await createUserWithEmailAndPassword(auth, `sdk-a-${stamp}@example.test`, "password123")).user.uid
+const A = `sdk-a-${stamp}@example.test`, B = `sdk-b-${stamp}@example.test`
+const a = (await createUserWithEmailAndPassword(auth, A, "password123")).user.uid
 await signOut(auth)
-await createUserWithEmailAndPassword(auth, `sdk-b-${stamp}@example.test`, "password123")
+await createUserWithEmailAndPassword(auth, B, "password123")
 await signOut(auth)
-const video = new Uint8Array(4000), json = new TextEncoder().encode('{"a":1}')
-async function as(uidEmail) { await signOut(auth); if (uidEmail) await (await import("firebase/auth")).signInWithEmailAndPassword(auth, uidEmail, "password123") }
-const cases = [
-  ["ALLOW", "own recording.webm", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/recording.webm`, video, "video/webm"],
-  ["ALLOW", "own recording.mp4", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/recording.mp4`, video, "video/mp4"],
-  ["ALLOW", "own request.json", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/request.json`, json, "application/json"],
-  ["ALLOW", "overwrite own recording", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/recording.webm`, video, "video/webm"],
-  ["ALLOW", "avatar (existing rule)", `sdk-a-${stamp}@example.test`, `users/${a}/a.png`, video, "image/png"],
-  ["DENY", "other user into A's folder", `sdk-b-${stamp}@example.test`, `studio/${a}/s1/recording.webm`, video, "video/webm"],
-  ["DENY", "signed out", null, `studio/${a}/s1/recording.webm`, video, "video/webm"],
-  ["DENY", "html file", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/x.html`, json, "text/html"],
-  ["DENY", "video named request.json", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/request.json`, video, "video/webm"],
-  ["DENY", "json named recording.webm", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/recording.webm`, json, "application/json"],
-  ["DENY", "nested deeper", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/x/recording.webm`, video, "video/webm"],
-  ["DENY", "outside studio", `sdk-a-${stamp}@example.test`, `other/${a}/x.webm`, video, "video/webm"],
-  ["DENY", "70KB request.json", `sdk-a-${stamp}@example.test`, `studio/${a}/s1/request.json`, new Uint8Array(70000), "application/json"],
-]
-let fail = 0
-for (const [expect, label, who, path, data, contentType] of cases) {
-  await as(who)
-  let got
-  try { await uploadBytes(ref(st, path), data, { contentType }); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
-  if (got !== expect) fail++
-  console.log(`${got === expect ? "ok  " : "FAIL"} ${label}: ${got}`)
-}
-await as(`sdk-a-${stamp}@example.test`)
-try { await getBytes(ref(st, `studio/${a}/s1/recording.webm`)); console.log("FAIL read own: ALLOW"); fail++ } catch (e) { console.log(`ok   read own: ${e.code === "storage/unauthorized" ? "DENY" : e.code}`) }
+async function as(email) { await signOut(auth); if (email) await signInWithEmailAndPassword(auth, email, "password123") }
 
-// No browser token reads, lists or deletes under studio/, not even a
-// verified VisaFlo staff address: /admin goes through the server and its
-// service account (lib/studio/admin-firebase.ts).
-const STAFF = "bkim@vflo.app"
-await signOut(auth)
-const staffUid = await createUserWithEmailAndPassword(auth, STAFF, "password123").then((c) => c.user.uid, async () => (await (await import("firebase/auth")).signInWithEmailAndPassword(auth, STAFF, "password123")).user.uid)
-const verify = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-studio/accounts:update", {
-  method: "POST", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify({ localId: staffUid, emailVerified: true }),
-})
-if (!verify.ok) throw new Error(await verify.text())
-async function denied(label, attempt) {
+// A fresh submission id per run, in newSubmissionId's shape, so "create"
+// isn't refused as an overwrite of the last run's file.
+const sid = (n) => `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-${(stamp + n).toString(16).slice(-8).padStart(8, "0")}`
+const S1 = sid(1), S2 = sid(2), S3 = sid(3)
+const video = new Uint8Array(4000), json = new TextEncoder().encode('{"a":1}')
+
+let fail = 0
+async function expectThat(expected, label, attempt) {
   let got
   try { await attempt(); got = "ALLOW" } catch (e) { got = e.code === "storage/unauthorized" ? "DENY" : `ERR ${e.code}` }
-  if (got !== "DENY") fail++
-  console.log(`${got === "DENY" ? "ok  " : "FAIL"} ${label}: ${got}`)
+  if (got !== expected) fail++
+  console.log(`${got === expected ? "ok  " : "FAIL"} ${label}: ${got}`)
 }
-await as(STAFF)
-await denied("verified staff reads a recording", () => getBytes(ref(st, `studio/${a}/s1/recording.webm`)))
-await denied("verified staff lists studio/", () => list(ref(st, "studio/")))
-await denied("verified staff deletes a recording", () => deleteObject(ref(st, `studio/${a}/s1/recording.webm`)))
-await denied("verified staff writes extra.json next to a recording", () => uploadBytes(ref(st, `studio/${a}/s1/extra.json`), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }))
-await as(`sdk-a-${stamp}@example.test`)
-await denied("owner deletes their own recording", () => deleteObject(ref(st, `studio/${a}/s1/recording.webm`)))
-await denied("owner writes extra.json next to their recording", () => uploadBytes(ref(st, `studio/${a}/s1/extra.json`), new Blob(["{}"], { type: "application/json" }), { contentType: "application/json" }))
-await as(`sdk-b-${stamp}@example.test`)
-try { await list(ref(st, "studio/")); console.log("FAIL other user lists studio/: ALLOW"); fail++ } catch (e) { console.log(`ok   other user lists studio/: ${e.code === "storage/unauthorized" ? "DENY" : e.code}`) }
+const put = (path, data, contentType) => () => uploadBytes(ref(st, path), data, { contentType })
+
+// /start: nobody signed in.
+await as(null)
+await expectThat("ALLOW", "signed out creates recording.webm", put(`studio/${S1}/recording.webm`, video, "video/webm"))
+await expectThat("ALLOW", "signed out creates recording.mp4", put(`studio/${S2}/recording.mp4`, video, "video/mp4"))
+await expectThat("DENY", "overwrite an existing recording", put(`studio/${S1}/recording.webm`, video, "video/webm"))
+await expectThat("DENY", "request.json from a browser", put(`studio/${S3}/request.json`, json, "application/json"))
+await expectThat("DENY", "html file", put(`studio/${S3}/x.html`, json, "text/html"))
+await expectThat("DENY", "json named recording.webm", put(`studio/${S3}/recording.webm`, json, "application/json"))
+await expectThat("DENY", "folder that isn't a submission id", put(`studio/not-an-id/recording.webm`, video, "video/webm"))
+await expectThat("DENY", "upper-case hex in the id", put(`studio/${S3.toUpperCase()}/recording.webm`, video, "video/webm"))
+await expectThat("DENY", "nested deeper", put(`studio/${S3}/x/y/recording.webm`, video, "video/webm"))
+await expectThat("DENY", "outside studio", put(`other/${S3}/recording.webm`, video, "video/webm"))
+await expectThat("DENY", "read a recording", () => getBytes(ref(st, `studio/${S1}/recording.webm`)))
+await expectThat("DENY", "list studio/", () => list(ref(st, "studio/")))
+await expectThat("DENY", "list a submission", () => list(ref(st, `studio/${S1}/`)))
+await expectThat("DENY", "delete a recording", () => deleteObject(ref(st, `studio/${S1}/recording.webm`)))
+// A signed-in browser gets nothing more.
+await as(A)
+await expectThat("DENY", "signed in reads a recording", () => getBytes(ref(st, `studio/${S1}/recording.webm`)))
+await expectThat("DENY", "signed in overwrites a recording", put(`studio/${S1}/recording.webm`, video, "video/webm"))
+
+// The old signed-in folders, kept until the migration is done.
+await expectThat("ALLOW", "old: own recording", put(`studio/${a}/s1/recording.webm`, video, "video/webm"))
+await expectThat("ALLOW", "old: own request.json", put(`studio/${a}/s1/request.json`, json, "application/json"))
+await expectThat("ALLOW", "avatar (existing rule)", put(`users/${a}/a.png`, video, "image/png"))
+await as(B)
+await expectThat("DENY", "old: other user into A's folder", put(`studio/${a}/s1/recording.webm`, video, "video/webm"))
+await as(null)
+await expectThat("DENY", "old: signed out into A's folder", put(`studio/${a}/s1/recording.webm`, video, "video/webm"))
+
 console.log(fail ? `${fail} FAILED` : "all passed")
 await deleteApp(app); process.exit(fail ? 1 : 0)
