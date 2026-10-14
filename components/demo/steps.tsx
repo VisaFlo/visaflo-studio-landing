@@ -198,7 +198,7 @@ export function FaceVoiceStep({
             {rec !== "idle" && (
               <div className="absolute inset-y-0 left-1/2 w-[158px] -translate-x-1/2 overflow-hidden">
                 <Image
-                  src="/samples/alex-face.jpg"
+                  src="/samples/alex-setup.jpeg"
                   alt={rec === "done" ? "Your portrait video" : ""}
                   fill
                   sizes="158px"
