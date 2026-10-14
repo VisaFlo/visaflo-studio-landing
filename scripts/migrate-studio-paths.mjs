@@ -1,6 +1,7 @@
 // One-off: moves the recordings made while /start needed sign-in, from
 // studio/{uid}/{submissionId}/ to studio/{submissionId}/, where /admin and
-// the server now look. Each file is copied (contentType, custom metadata and
+// the server now look. Everything in the folder moves, sub-folders too (the
+// removed automatic pipeline left its output in sample/). Each file is copied (contentType, custom metadata and
 // the Firebase download token come along, so the admin player keeps working),
 // the copy's md5 and size are checked, and only then is the original deleted.
 // Safe to run again: a file already at its new place with the same bytes only
@@ -16,7 +17,7 @@ import { getStorage } from "firebase-admin/storage"
 
 const BUCKET = "devdashboard-c9159-ca" // lib/studio/project.ts
 const SUBMISSION_ID = /^\d{8}T\d{6}-[0-9a-f]{8}$/ // lib/studio/project.ts
-const OLD = /^studio\/([^/]+)\/([^/]+)\/([^/]+)$/
+const OLD = /^studio\/([^/]+)\/([^/]+)\/(.+)$/
 
 const apply = process.argv.includes("--apply")
 const emulator = Boolean(process.env.FIREBASE_STORAGE_EMULATOR_HOST)
