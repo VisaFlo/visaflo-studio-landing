@@ -666,7 +666,7 @@ function AboutStep({ initial, onContinue }: { initial: StudioProfile; onContinue
               label="Email"
               type="email"
               autoComplete="email"
-              placeholder="you@firm.com"
+              placeholder="alex@visaflo.ca"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value)
@@ -676,14 +676,28 @@ function AboutStep({ initial, onContinue }: { initial: StudioProfile; onContinue
             {emailError && <ErrorText>{emailError}</ErrorText>}
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6">
-            <Field id="first-name" label="First name" autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-            <Field id="last-name" label="Last name" autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            <Field
+              id="first-name"
+              label="First name"
+              autoComplete="given-name"
+              placeholder="Alex"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+            <Field
+              id="last-name"
+              label="Last name"
+              autoComplete="family-name"
+              placeholder="Kim"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
           </div>
           <Field
             id="firm"
             label="Firm name"
             autoComplete="organization"
-            placeholder="Lopez Immigration"
+            placeholder="VisaFlo Immigration"
             value={firm}
             onChange={(e) => setFirm(e.target.value)}
           />
