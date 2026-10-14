@@ -41,7 +41,7 @@ service firebase.storage {
 
     // Before /start dropped sign-in (2026-10): a signed-in person's own
     // studio/{uid}/{submissionId}/ folder. Kept only for a page opened before
-    // that release; remove once scripts/migrate-studio-paths.ts has moved the
+    // that release; remove once scripts/migrate-studio-paths.mjs has moved the
     // last of these folders.
     match /studio/{uid}/{submissionId}/{fileName} {
       allow create, update: if request.auth != null
