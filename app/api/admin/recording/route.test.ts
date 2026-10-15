@@ -99,6 +99,27 @@ describe("GET /api/admin/recording", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Streaming the recording for 20261009T211755-393dbaa7"), expect.anything())
   })
 
+  it("downloads the photo with &file=photo, named like the recording", async () => {
+    const bucket = serve({
+      listings: { "studio/20261009T211755-393dbaa7/": { items: ["studio/20261009T211755-393dbaa7/photo.jpg", "studio/20261009T211755-393dbaa7/recording.mp4", "studio/20261009T211755-393dbaa7/request.json"] } },
+      media: { "studio/20261009T211755-393dbaa7/request.json": { name: "Dan Jeong" } },
+    })
+    bucket.read.mockResolvedValue({ body: new Response("jpeg").body!, contentType: undefined, length: 4 })
+    const response = await GET(new Request("http://x/api/admin/recording?id=20261009T211755-393dbaa7&file=photo"))
+    expect(response.status).toBe(200)
+    expect(bucket.read).toHaveBeenCalledWith("studio/20261009T211755-393dbaa7/photo.jpg")
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="dan-jeong-20261009T211755-393dbaa7.jpg"')
+    expect(response.headers.get("content-type")).toBe("image/jpeg")
+  })
+
+  it("is 404 for a photo the folder doesn't have, and 400 for an unknown file", async () => {
+    serve({ listings: { "studio/20261009T211755-393dbaa7/": { items: ["studio/20261009T211755-393dbaa7/recording.mp4"] } } })
+    const photo = await GET(new Request("http://x/api/admin/recording?id=20261009T211755-393dbaa7&file=photo"))
+    expect(photo.status).toBe(404)
+    expect(await photo.json()).toEqual({ error: "No photo in that folder." })
+    expect((await GET(new Request("http://x/api/admin/recording?id=20261009T211755-393dbaa7&file=request.json"))).status).toBe(400)
+  })
+
   it("tells a refused service account from the rest", async () => {
     serve({ listings: { "studio/20261009T211755-393dbaa7/": 403 } })
     const refused = await get("20261009T211755-393dbaa7")

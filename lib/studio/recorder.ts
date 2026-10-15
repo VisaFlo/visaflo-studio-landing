@@ -1,7 +1,6 @@
 "use client"
 
 import type { Check, RecordingChecks } from "@/lib/studio/checks"
-import type { RecordingExtension } from "@/lib/studio/project"
 
 // MediaRecorder container the browser can write: MP4 on Safari, WebM on
 // Chrome and Firefox (newer Chrome can do MP4 too, which we prefer).
@@ -16,14 +15,6 @@ const MIME_CANDIDATES = [
 export function pickRecordingMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined
   return MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type))
-}
-
-// The file name the upload gets: only what the storage rules accept.
-export function extensionFor(mime: string): RecordingExtension {
-  if (mime.includes("mp4")) return "mp4"
-  if (mime.includes("quicktime")) return "mov"
-  if (mime.includes("x-m4v")) return "m4v"
-  return "webm"
 }
 
 export type Recording = {

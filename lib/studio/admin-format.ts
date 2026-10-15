@@ -36,7 +36,7 @@ export function topicFallback(status: Submission["status"]): string {
 
 const PROBLEM_TEXT: Record<SubmissionProblem["kind"], string> = {
   "no-recording": "No recording file in this folder",
-  "no-token": "The recording has no download token, so it can't play here; use Download recording",
+  "no-token": "The recording has no download token, so it can't play here; use Download video",
   "meta-unreadable": "The recording's metadata couldn't be read",
   "request-unreadable": "request.json couldn't be read",
 }

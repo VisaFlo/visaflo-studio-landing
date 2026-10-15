@@ -23,6 +23,8 @@ export type StudioRequestMail = {
    * RECOVERED_CHECKS for a recovered take).
    */
   checks?: RecordingChecks
+  /** Absent from a page from before the portrait photo. */
+  photoPath?: string
   consentAt: string
   /** The submission's page in /admin. */
   adminUrl: string
@@ -43,7 +45,8 @@ export async function sendStudioRequestEmail(entry: StudioRequestMail): Promise<
     ["Email", `${entry.email} (typed, not verified: confirm before using their face)`],
     ["Topic", entry.topicTitle],
     ["Recording", `${minutes(entry.recordingSeconds)} (${entry.recordingSource}), ${checks}`],
-    ["File", `gs://${BUCKET}/${entry.recordingPath}`],
+    ["Photo", entry.photoPath ? `gs://${BUCKET}/${entry.photoPath}` : "— (sent from a page without the photo step)"],
+    ["Video", `gs://${BUCKET}/${entry.recordingPath}`],
     ["Consent", `Agreed ${vancouverTime(new Date(entry.consentAt))}`],
     ["Time", vancouverTime(new Date())],
   ])

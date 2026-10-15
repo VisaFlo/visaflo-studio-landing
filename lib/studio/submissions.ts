@@ -1,6 +1,7 @@
 import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
 import { isPlainObject } from "@/lib/studio/checks"
-import { RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
+import { submissionFolder } from "@/lib/studio/paths"
+import { PHOTO_FILE, RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
 import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
 import { consoleUrl, firstDownloadToken, mediaUrl, StorageError, type StudioBucket } from "@/lib/studio/storage"
 
@@ -11,9 +12,7 @@ export function parseSubmissionId(id: unknown): string | null {
   return typeof id === "string" && SUBMISSION_ID.test(id) ? id : null
 }
 
-export function submissionFolder(submissionId: string): string {
-  return `studio/${submissionId}`
-}
+export { submissionFolder } from "@/lib/studio/paths"
 
 const RECORDING = new RegExp(`/recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
 
@@ -22,13 +21,14 @@ export function recordingObject(items: string[]): string | undefined {
   return items.find((name) => RECORDING.test(name))
 }
 
-// What a downloaded recording is called: the person (name, else email, each
-// reduced to [a-z0-9-] so the header stays plain), the submission, and the
-// recording's own extension (mp4 when it has none). `submissionId` has been
-// through parseSubmissionId, so it is header-safe already.
+// What a downloaded recording or photo is called: the person (name, else
+// email, each reduced to [a-z0-9-] so the header stays plain; else the file's
+// own name, "recording" or "photo"), the submission, and the file's own
+// extension (mp4 when it has none). `submissionId` has been through
+// parseSubmissionId, so it is header-safe already.
 export function downloadName(who: Pick<RequestJson, "name" | "email">, submissionId: string, objectName: string): string {
   const slug = (value?: string) => (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-  const person = slug(who.name) || slug(who.email) || "recording"
+  const person = slug(who.name) || slug(who.email) || slug(/([^/.]+)(\.\w+)?$/.exec(objectName)?.[1]) || "recording"
   const ext = /\.(\w+)$/.exec(objectName)?.[1] ?? "mp4"
   return `${person}-${submissionId}.${ext}`
 }
@@ -42,6 +42,7 @@ async function readSubmission(bucket: StudioBucket, submissionId: string, items:
     problems: [],
   }
   const recording = recordingObject(items)
+  const photo = items.find((name) => name === `${folder}/${PHOTO_FILE}`)
   const request = items.find((name) => name.endsWith("/request.json"))
 
   // A refused read is about the server's credentials, not this file: let the
@@ -60,10 +61,24 @@ async function readSubmission(bucket: StudioBucket, submissionId: string, items:
     throw new Error(`request.json is ${Array.isArray(raw) ? "an array" : raw === null ? "null" : `a ${typeof raw}`}, not an object`)
   }
 
-  const [meta, details] = await Promise.all([
+  const [meta, details, photoMeta] = await Promise.all([
     recording ? bucket.meta(recording).catch(unreadable("meta-unreadable", "the recording's metadata")) : undefined,
     request ? bucket.json(request).then(asObject).catch(unreadable("request-unreadable", "request.json")) : undefined,
+    // Only the link depends on this; a photo whose metadata can't be read is
+    // still listed (and downloadable from the console).
+    photo
+      ? bucket.meta(photo).catch((error: unknown) => {
+          if (error instanceof StorageError && error.refused) throw error
+          console.error(`Could not read the photo's metadata in ${folder}`, error)
+          return undefined
+        })
+      : undefined,
   ])
+
+  if (photo) {
+    const token = photoMeta ? firstDownloadToken(photoMeta) : undefined
+    submission.photo = token ? { name: photo, url: mediaUrl(photo, token) } : { name: photo }
+  }
 
   if (recording) submission.recording = { name: recording }
   else submission.problems.push({ kind: "no-recording" })

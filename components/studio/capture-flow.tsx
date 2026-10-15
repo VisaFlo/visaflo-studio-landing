@@ -1,66 +1,93 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react"
 import Link from "next/link"
-import { Lightbulb, Monitor, Image as ImageIcon, VolumeX, TriangleAlert } from "lucide-react"
+import { Camera, Newspaper, Send, Video } from "lucide-react"
 
-import { AlignStep, CameraAllowStep, CameraBlockedStep, FaceWatch, ReviewStep, ScriptStep, type ReviewNotice } from "@/components/studio/capture-steps"
 import {
-  AccountHeader,
+  AlignStep,
+  CameraAllowStep,
+  CameraBlockedStep,
+  CountdownStep,
+  FaceWatch,
+  PhotoReviewStep,
+  ReviewStep,
+  ScriptStep,
+  type ReviewNotice,
+} from "@/components/studio/capture-steps"
+import { GuideStep, PHOTO_GUIDE, VIDEO_GUIDE } from "@/components/studio/guide"
+import {
   Display,
   DoneMark,
   ErrorText,
   Field,
-  FlowHeader,
+  MonoLabel,
   Page,
   PrimaryButton,
   QuietButton,
+  StepsHeader,
+  type HeaderStep,
 } from "@/components/studio/ui"
 import { identify, track } from "@/lib/mixpanel"
 import { faceVerdict, markPlayable, RECOVERED_CHECKS, type Check, type RecordingChecks } from "@/lib/studio/checks"
 import { CONSENT_TEXT, OWN_TOPIC_ID, scriptLines, TOPICS } from "@/lib/studio/content"
 import { ApiError, describeSubmitError, uploadFailureReason, type UploadFailure } from "@/lib/studio/errors"
+import { capturePhoto, type Photo } from "@/lib/studio/photo"
 import { portraitStream, type PortraitStream } from "@/lib/studio/portrait"
 import { EMPTY_PROFILE, loadProfile, profileComplete, saveProfile, type StudioProfile } from "@/lib/studio/profile"
 import { asEmail, fullName } from "@/lib/studio/request-json"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording, type StoppedTake } from "@/lib/studio/recorder"
-import { beginTake, clearTake, finishTake, loadTake, saveChunk } from "@/lib/studio/take-store"
+import { beginTake, clearPhoto, clearTake, finishTake, loadPhoto, loadTake, saveChunk, savePhoto } from "@/lib/studio/take-store"
+import {
+  headerStep,
+  reachedAfterNewPhoto,
+  reachedAfterNewTake,
+  reachedOnVisit,
+  stepIndex,
+  STEPS,
+  type CameraFor,
+  type Step,
+} from "@/lib/studio/flow-steps"
 import {
   lastSent,
   newSubmissionId,
+  photoPath,
+  recordingPath,
   rememberSent,
   submitSampleRequest,
+  uploadPhoto,
   uploadRecording,
   type SentRequest,
-  type UploadHandle,
 } from "@/lib/studio/upload"
+import { cancelPlan, filesToStart, planFor, settlePlan, startFile, type UploadPlan } from "@/lib/studio/upload-plan"
 import { cn } from "@/lib/utils"
 
-type Step =
-  | "loading"
-  | "about"
-  | "setup"
-  | "camera"
-  | "blocked"
-  | "align"
-  | "script"
-  | "review"
-  | "topic"
-  | "done"
-
-// The recording upload, for the banner. A failure keeps how far it got and
-// says why (see uploadFailureReason).
+// The upload, for the Make my sample button and the Submit screen. A failure
+// keeps how far it got and says why (see uploadFailureReason).
 type UploadState = { status: "idle" } | { status: "uploading"; progress: number } | { status: "done" } | ({ status: "failed"; progress: number } & UploadFailure)
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
+// Added to the notice of a take restored without its photo; dropped once the photo is taken.
+const PHOTO_LOST = " Your photo wasn't kept, so take it again first."
+
 const CUT_OFF_NOTICE: ReviewNotice = {
-  text: "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again.",
+  text: "Recording stopped early. We kept what was recorded up to that point. Watch it, then use it or record again.",
   partial: true,
 }
 
 export function CaptureFlow() {
   const [step, setStep] = useState<Step>("loading")
+  const [cameraFor, setCameraFor] = useState<CameraFor>("photo")
+  // The furthest step reached: the header opens any step up to it (see
+  // lib/studio/flow-steps.ts).
+  const [reached, setReached] = useState(0)
+  const [reachedFor, setReachedFor] = useState<Step>(step)
+  const at = stepIndex(step, cameraFor)
+  if (reachedFor !== step) {
+    setReachedFor(step)
+    setReached((r) => reachedOnVisit(r, at))
+  }
   const [profile, setProfile] = useState<StudioProfile>(EMPTY_PROFILE)
   const [sent, setSent] = useState<SentRequest | null>(null)
 
@@ -72,6 +99,9 @@ export function CaptureFlow() {
   const [camera, setCamera] = useState<MediaStream | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const [cameraBusy, setCameraBusy] = useState(false)
+  // Set once the browser has let us have the camera: going back to a camera
+  // screen later (Retake, Record again) reopens it without the Allow screen.
+  const cameraAllowed = useRef(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const recorder = useRef<ActiveRecorder | null>(null)
   // Counts takes, so a Finish that was still completing when the person
@@ -90,15 +120,24 @@ export function CaptureFlow() {
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
-  const [consentAt, setConsentAt] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
   // Why the take on review needs a word (recovered, or cut off), and whether
   // it is only part of what was recorded, which changes what an unplayable
   // file means. Null for a fresh, whole take.
   const [reviewNotice, setReviewNotice] = useState<ReviewNotice | null>(null)
 
-  const submissionId = useRef<string | null>(null)
-  const upload = useRef<UploadHandle | null>(null)
+  // The portrait photo, kept (with the take) until the request is sent.
+  const [photo, setPhoto] = useState<Photo | null>(null)
+  // Remounts the photo framing after a failed capture, so its face check starts fresh.
+  const [photoAttempt, setPhotoAttempt] = useState(0)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  // A guide opened from its camera screen ("Remind me…", "Video tips"): its
+  // back arrow returns to that screen.
+  const [tipsOnly, setTipsOnly] = useState(false)
+
+  // The submission being uploaded: its folder, and the take and photo it is
+  // for (see lib/studio/upload-plan.ts).
+  const uploadPlan = useRef<UploadPlan<Recording, Photo> | null>(null)
   const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" })
   const [topicId, setTopicId] = useState<string | null>(null)
   const [ownTopic, setOwnTopic] = useState("")
@@ -106,12 +145,13 @@ export function CaptureFlow() {
   const [sendError, setSendError] = useState<string | null>(null)
 
   // What this browser knows about them: who they said they are, a request
-  // already sent, a take left from last time.
+  // already sent, a photo and a take left from last time.
   useEffect(() => {
     let cancelled = false
-    void loadTake()
-      .then((saved) => {
+    void Promise.all([loadTake(), loadPhoto()])
+      .then(([saved, savedPhoto]) => {
         if (cancelled) return
+        if (savedPhoto) setPhoto({ ...savedPhoto, url: URL.createObjectURL(savedPhoto.blob) })
         const next = loadProfile()
         const complete = profileComplete(next)
         setProfile(next)
@@ -119,7 +159,8 @@ export function CaptureFlow() {
         setSent(previous)
         if (complete) identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
         // A take left from a reload or a closed tab: pick up at review rather
-        // than making them record again.
+        // than making them record again. One kept without its photo (the
+        // browser wouldn't store it) says so; the photo is taken again first.
         if (!previous && saved && complete) {
           const { take: stored, blob, chunks } = saved
           setRecording({
@@ -132,17 +173,17 @@ export function CaptureFlow() {
             // leave the checks out, so the team reads "not recorded".
             checks: stored.finished?.checks ?? RECOVERED_CHECKS,
           })
-          setReviewNotice(
-            !stored.finished
-              ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.", partial: true }
-              : stored.finished.cutOff
-                ? CUT_OFF_NOTICE
-                : { text: "We kept your last recording. Watch it, then submit it or record again.", partial: false },
-          )
+          setReached(2)
+          const notice: ReviewNotice = !stored.finished
+            ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then use it or record again.", partial: true }
+            : stored.finished.cutOff
+              ? CUT_OFF_NOTICE
+              : { text: "We kept your last recording. Watch it, then use it or record again.", partial: false }
+          setReviewNotice(savedPhoto ? notice : { ...notice, text: notice.text + PHOTO_LOST })
           setStep("review")
           return
         }
-        setStep(previous ? "done" : complete ? "setup" : "about")
+        setStep(previous ? "done" : "about")
       })
       .catch((error: unknown) => {
         // Never leave the page on "Loading…": without a profile, start at the top.
@@ -178,7 +219,7 @@ export function CaptureFlow() {
 
   // Warn before closing the tab mid-recording or mid-upload.
   useEffect(() => {
-    const busy = step === "script" || uploadState.status === "uploading" || sending
+    const busy = step === "countdown" || step === "script" || uploadState.status === "uploading" || sending
     if (!busy) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener("beforeunload", warn)
@@ -222,7 +263,8 @@ export function CaptureFlow() {
     [stopCamera],
   )
 
-  async function openCamera() {
+  async function openCamera(target: CameraFor) {
+    setCameraFor(target)
     setCameraError(null)
     setCameraBusy(true)
     try {
@@ -244,11 +286,12 @@ export function CaptureFlow() {
         })
       }
       streamRef.current = media
+      cameraAllowed.current = true
       setCamera(media)
       portrait.current?.stop()
       portrait.current = portraitStream(media)
       setStream(portrait.current.stream)
-      setStep("align")
+      setStep(target)
     } catch (error) {
       console.error("Opening the camera failed", error)
       // A stream that did open (portraitStream threw after getUserMedia) must
@@ -289,12 +332,64 @@ export function CaptureFlow() {
     })
   }
 
-  // Framing checks passed (or the person chose to start anyway): recording
-  // starts and the script comes up.
-  function beginScript(result: { faceSeen: Check }) {
+  // Take photo pressed: take the still from the preview they framed
+  // themselves in.
+  async function takePhoto(result: { faceSeen: Check; preview: HTMLVideoElement | null }) {
+    setPhotoError(null)
+    try {
+      if (!result.preview) throw new Error("No camera preview to take the photo from")
+      const next = await capturePhoto(result.preview, result.faceSeen)
+      setPhoto((previous) => {
+        if (previous) URL.revokeObjectURL(previous.url)
+        return next
+      })
+      // The take stays, and goes through its review again with the new photo.
+      setReached((r) => reachedAfterNewPhoto(r, Boolean(recording)))
+      forgetLastSend()
+      setStep("photo-review")
+    } catch (error) {
+      console.error("Taking the portrait photo failed", error)
+      setPhotoError("We couldn't take the photo. Hold still and try again.")
+      setPhotoAttempt((n) => n + 1)
+    }
+  }
+
+  // A new photo or take hasn't been sent: what the last Make my sample said
+  // (an upload or request failure) is about the one before.
+  function forgetLastSend() {
+    setUploadState({ status: "idle" })
+    setSendError(null)
+  }
+
+  function keepPhoto() {
+    if (!photo) return
+    void savePhoto({ blob: photo.blob, width: photo.width, height: photo.height, faceSeen: photo.faceSeen })
+    track("studio_photo_taken", { faceSeen: photo.faceSeen })
+    setTipsOnly(false)
+    // A take restored without its photo has it now.
+    setReviewError(null)
+    setReviewNotice((n) => (n ? { ...n, text: n.text.replace(PHOTO_LOST, "") } : n))
+    // Changing the photo of a take already recorded goes back to that take,
+    // with the camera off (the video step reopens it).
+    if (recording) {
+      stopCamera()
+      setStep("review")
+      return
+    }
+    setStep("video-guide")
+  }
+
+  // Start recording pressed: what the framing check saw is kept, and the
+  // full-screen countdown runs.
+  function startCountdown(result: { faceSeen: Check }) {
+    alignFaceSeen.current = result.faceSeen
+    setStep("countdown")
+  }
+
+  // The countdown ended: recording starts and the script comes up.
+  function beginScript() {
     if (!stream) return
     take.current += 1
-    alignFaceSeen.current = result.faceSeen
     faceFrames.current = { total: 0, found: 0 }
     recorder.current?.cancel()
     try {
@@ -386,40 +481,84 @@ export function CaptureFlow() {
     })
     setReviewError(null)
     setReviewNotice(result.cutOff ? CUT_OFF_NOTICE : null)
+    setReached(reachedAfterNewTake)
+    forgetLastSend()
     setStep("review")
   }, [abandonCamera, stopCamera])
 
-  function startUpload(rec: Recording) {
-    upload.current?.cancel()
-    submissionId.current ??= newSubmissionId()
-    setUploadState({ status: "uploading", progress: 0 })
-    const handle = uploadRecording(profile.email, submissionId.current, rec, (progress) =>
-      setUploadState((s) => (s.status === "uploading" ? { status: "uploading", progress } : s)),
-    )
-    upload.current = handle
-    handle.done
-      .then(() => setUploadState({ status: "done" }))
-      .catch((error: unknown) => {
-        if ((error as { code?: string })?.code === "storage/canceled") return
-        console.error("Upload failed", error)
-        setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...uploadFailureReason(error) }))
-      })
+  // The photo and the recording go up together into the submission's folder;
+  // the progress shown is the recording's, the photo being a fraction of its
+  // size, and it fails only once both have settled. `refused`: a try after a
+  // refusal, which starts a new folder (see upload-plan.ts).
+  function startUpload(rec: Recording, still: Photo, { refused = false } = {}): UploadPlan<Recording, Photo> {
+    const previous = uploadPlan.current
+    const plan = planFor(previous, rec, still, { refused, newId: newSubmissionId })
+    if (plan !== previous) cancelPlan(previous)
+    uploadPlan.current = plan
+    const starting = filesToStart(plan)
+    const recordingDone = plan.files.recording?.status === "done"
+    setUploadState((s) => ({
+      status: "uploading",
+      progress: recordingDone ? 1 : starting.includes("recording") ? 0 : s.status === "uploading" ? s.progress : 0,
+    }))
+    let startError: unknown = null
+    try {
+      for (const name of starting) {
+        startFile(plan, name, () =>
+          name === "photo"
+            ? { done: uploadPhoto(profile.email, plan.submissionId, still.blob), cancel: () => {} }
+            : uploadRecording(profile.email, plan.submissionId, rec, (progress) => {
+                if (uploadPlan.current === plan) setUploadState((s) => (s.status === "uploading" ? { status: "uploading", progress } : s))
+              }),
+        )
+      }
+    } catch (error) {
+      // The SDK refused before any request (no storage, a bad ref): the Submit
+      // screen says so rather than sitting on "uploading".
+      console.error("Upload didn't start", error)
+      startError = error
+      setUploadState({ status: "failed", progress: 0, ...uploadFailureReason(error) })
+    }
+    // Every failure is logged, even of a submission since replaced; the
+    // screen follows only the current one. A refusal wins over the other
+    // reasons, since pressing Make my sample again after a refusal has to
+    // start a new folder.
+    void settlePlan(plan).then(({ complete, failures }) => {
+      for (const failure of failures) console.error(`Upload of the ${failure.name} failed`, failure.error)
+      if (uploadPlan.current !== plan) return
+      if (complete) {
+        setUploadState({ status: "done" })
+        return
+      }
+      const reasons = failures.map((failure) => uploadFailureReason(failure.error))
+      if (startError !== null) reasons.push(uploadFailureReason(startError))
+      if (!reasons.length) {
+        console.error("The upload ended without every file and without a failure", Object.keys(plan.files))
+        reasons.push({ reason: "other", code: "incomplete" })
+      }
+      const reason = reasons.find((r) => r.reason === "refused") ?? reasons[0]
+      setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...reason }))
+    })
+    return plan
   }
 
-  function submitRecording() {
+  // Use this video: the take is checked here, then on to the topic. Nothing
+  // is uploaded until Make my sample.
+  function useRecording() {
     if (!recording) return
+    if (!photo) {
+      // A take recovered without its photo: the photo comes first.
+      setReviewError("Take your portrait photo first: open Take a photo above.")
+      return
+    }
     if (recording.blob.size === 0) {
       setReviewError("This recording is empty. Record again.")
       return
     }
     if (recording.blob.size > MAX_UPLOAD_BYTES) {
-      setReviewError("This recording is over 500 MB. Record again and keep it to about a minute and a half.")
+      setReviewError("This recording is over 500 MB. Record again and keep it to about 30 seconds.")
       return
     }
-    setConsentAt(new Date().toISOString())
-    // A new recording is a new submission.
-    submissionId.current = null
-    startUpload(recording)
     track("studio_recording_submitted", { source: recording.source, seconds: recording.seconds })
     setStep("topic")
   }
@@ -427,48 +566,49 @@ export function CaptureFlow() {
   const topicTitle =
     topicId === OWN_TOPIC_ID ? ownTopic.trim() : (TOPICS.find((t) => t.id === topicId)?.title ?? "")
 
-  // "Make my sample" can be pressed while the upload is still running; the
-  // request goes out the moment the file is in. Everything it sends is read
-  // here, once, so changing the topic mid-wait can't send a second request.
+  // Make my sample: the photo and the video go up, then the request goes out.
+  // Pressed again after a failure, it re-sends only what didn't make it (a
+  // refusal starts a new folder; see upload-plan.ts), and after a request that
+  // failed with both files up, it only sends the request again. The Submit
+  // screen is locked meanwhile, so what it sends is what's on it.
   async function makeSample() {
-    if (!topicTitle || !recording || !upload.current || sending) return
-    const handle = upload.current
-    const request = {
-      submissionId: submissionId.current ?? "",
-      recordingPath: handle.path,
-      recordingSeconds: recording.seconds,
-      recordingSource: recording.source,
-      checks: recording.checks,
-      email: profile.email,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      firm: profile.firm,
-      topicId: topicId ?? "",
-      topicTitle,
-      consent: CONSENT_TEXT,
-      consentAt: consentAt ?? new Date().toISOString(),
-    }
+    if (!topicTitle || !recording || !photo || !consent || sending) return
     setSendError(null)
     setSending(true)
     try {
-      await handle.done
-    } catch {
-      // The upload banner already says what went wrong and offers Retry.
-      setSending(false)
-      return
-    }
-    try {
+      const consentAt = new Date().toISOString()
+      const plan = startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
+      const { complete } = await settlePlan(plan)
+      // The Submit screen says what went wrong (uploadState).
+      if (!complete || uploadPlan.current !== plan) return
+      const request = {
+        submissionId: plan.submissionId,
+        recordingPath: recordingPath(plan.submissionId, recording),
+        photoPath: photoPath(plan.submissionId),
+        recordingSeconds: recording.seconds,
+        recordingSource: recording.source,
+        checks: recording.checks,
+        email: profile.email,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        firm: profile.firm,
+        topicId: topicId ?? "",
+        topicTitle,
+        consent: CONSENT_TEXT,
+        consentAt,
+      }
       await submitSampleRequest(request)
       const record = { topicTitle: request.topicTitle, at: new Date().toISOString() }
       rememberSent(record)
       void clearTake()
+      void clearPhoto()
       setSent(record)
       track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
       setStep("done")
     } catch (error) {
-      // Only the API's own message is written for the person; SDK and fetch
-      // errors get words of ours.
-      console.error("Request failed", error)
+      // Only the API's own message is written for the person; SDK, fetch and
+      // anything else get words of ours.
+      console.error("Make my sample failed", error)
       setSendError(error instanceof ApiError ? error.message : describeSubmitError(error))
     } finally {
       setSending(false)
@@ -476,9 +616,15 @@ export function CaptureFlow() {
   }
 
   function startAnother() {
-    upload.current?.cancel()
+    cancelPlan(uploadPlan.current)
+    uploadPlan.current = null
     void clearTake()
+    void clearPhoto()
     setRecording((previous) => {
+      if (previous) URL.revokeObjectURL(previous.url)
+      return null
+    })
+    setPhoto((previous) => {
       if (previous) URL.revokeObjectURL(previous.url)
       return null
     })
@@ -486,18 +632,73 @@ export function CaptureFlow() {
     setTopicId(null)
     setOwnTopic("")
     setUploadState({ status: "idle" })
-    upload.current = null
-    submissionId.current = null
-    setStep("setup")
+    setReached(0)
+    setStep("photo-guide")
   }
 
   const name = fullName(profile.firstName, profile.lastName) ?? ""
   const lines = useMemo(() => scriptLines(name, profile.firm), [name, profile.firm])
 
+  // To a camera screen: straight there with the camera on, reopening it if it
+  // was allowed before, or through the camera permission step.
+  function toCamera(target: CameraFor) {
+    setCameraFor(target)
+    if (stream) {
+      setStep(target)
+      return
+    }
+    if (cameraAllowed.current) {
+      void openCamera(target)
+      return
+    }
+    setStep("camera")
+  }
+
+  // Where a header step takes you: back to what you made there (the photo,
+  // the take), not to its tips again.
+  function openStep(i: number) {
+    // Off the camera screens (a review is one), the camera goes off; Retake
+    // and Record again reopen it.
+    if (i === 0 || i >= 3 || (i === 1 && photo) || (i === 2 && recording)) stopCamera()
+    setTipsOnly(false)
+    if (i === 0) setStep("about")
+    else if (i === 1) setStep(photo ? "photo-review" : "photo-guide")
+    else if (i === 2) setStep(recording ? "review" : "video-guide")
+    else setStep(i === 3 ? "topic" : "submit")
+  }
+
+  // The back arrow, screen by screen. Recording (full screen) has its own close.
+  const back: Partial<Record<Step, () => void>> = {
+    "photo-guide": () => setStep(tipsOnly && stream ? "photo" : "about"),
+    photo: () => setStep("photo-guide"),
+    "photo-review": () => toCamera("photo"),
+    camera: () => setStep(cameraFor === "photo" ? "photo-guide" : "video-guide"),
+    blocked: () => setStep(cameraFor === "photo" ? "photo-guide" : "video-guide"),
+    "video-guide": () => setStep(tipsOnly && stream ? "align" : photo ? "photo-review" : "photo-guide"),
+    align: () => setStep("video-guide"),
+    review: () => toCamera("align"),
+    topic: () => setStep("review"),
+    submit: () => setStep("topic"),
+  }
+
+  // Steps can't be opened mid-recording, while the request goes out, or once it's sent.
+  const busy = step === "countdown" || step === "script" || sending || at === 5
+  const headerSteps: HeaderStep[] = STEPS.map((label, i) => {
+    const { state, open } = headerStep(i, at, reached, busy)
+    return { label, state, onOpen: open ? () => openStep(i) : undefined }
+  })
+  const header = (
+    <StepsHeader
+      steps={headerSteps}
+      counter={at < 5 ? `Step ${at + 1} of 5` : "Done"}
+      onBack={step === "loading" || sending ? undefined : back[step]}
+    />
+  )
+
   if (step === "loading") {
     return (
       <Page>
-        <AccountHeader />
+        {header}
         <main className="flex flex-grow items-center justify-center text-[14px] text-stone-500">Loading…</main>
       </Page>
     )
@@ -505,58 +706,88 @@ export function CaptureFlow() {
 
   return (
     <Page>
+      {header}
+
       {step === "about" && (
+        <AboutStep
+          initial={profile}
+          onContinue={(next) => {
+            saveProfile(next)
+            setSendError(null)
+            setProfile(next)
+            identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
+            setTipsOnly(false)
+            setStep(photo ? "photo-review" : "photo-guide")
+          }}
+        />
+      )}
+
+      {(step === "camera" || step === "blocked") &&
+        (step === "camera" ? (
+          <CameraAllowStep
+            unsupported={!recordingSupported}
+            error={cameraError}
+            busy={cameraBusy}
+            onAllow={() => void openCamera(cameraFor)}
+          />
+        ) : (
+          <CameraBlockedStep onRetry={() => void openCamera(cameraFor)} />
+        ))}
+
+      {step === "photo-guide" && (
+        <GuideStep key="photo" guide={PHOTO_GUIDE} onDone={() => toCamera("photo")} />
+      )}
+
+      {step === "video-guide" && (
+        <GuideStep key="video" guide={VIDEO_GUIDE} onDone={() => toCamera("align")} />
+      )}
+
+      {step === "photo" && stream && camera && (
         <>
-          <AccountHeader />
-          <AboutStep
-            initial={profile}
-            onContinue={(next) => {
-              saveProfile(next)
-              setProfile(next)
-              identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
-              setStep("setup")
+          {photoError && (
+            <div className="mx-auto w-full max-w-[560px] px-(--page-pad) pt-4 text-center">
+              <ErrorText>{photoError}</ErrorText>
+            </div>
+          )}
+          <AlignStep
+            key={photoAttempt}
+            stream={stream}
+            camera={camera}
+            purpose="photo"
+            onStart={(result) => void takePhoto(result)}
+            onCancel={() => setStep("photo-guide")}
+            onTips={() => {
+              setTipsOnly(true)
+              setStep("photo-guide")
             }}
           />
         </>
       )}
 
-      {step === "setup" && (
-        <>
-          <AccountHeader />
-          <SetupStep
-            firm={profile.firm}
-            onStart={() => setStep(stream ? "align" : "camera")}
-            onEditProfile={() => setStep("about")}
-          />
-        </>
-      )}
-
-      {(step === "camera" || step === "blocked") && (
-        <>
-          <FlowHeader title="Face and voice" step="Step 1 of 2" onBack={() => setStep("setup")} />
-          {step === "camera" ? (
-            <CameraAllowStep
-              unsupported={!recordingSupported}
-              error={cameraError}
-              busy={cameraBusy}
-              onAllow={() => void openCamera()}
-            />
-          ) : (
-            <CameraBlockedStep onRetry={() => void openCamera()} />
-          )}
-        </>
+      {step === "photo-review" && photo && (
+        <PhotoReviewStep photo={photo} onUse={keepPhoto} onRetake={() => toCamera("photo")} />
       )}
 
       {step === "align" && stream && camera && (
-        <>
-          <FlowHeader title="Face and voice" step="Step 1 of 2" onBack={() => { stopCamera(); setStep("setup") }} />
-          <AlignStep stream={stream} camera={camera} onStart={beginScript} />
-        </>
+        <AlignStep
+          stream={stream}
+          camera={camera}
+          purpose="video"
+          onStart={startCountdown}
+          onCancel={() => setStep("video-guide")}
+          onTips={() => {
+            setTipsOnly(true)
+            setStep("video-guide")
+          }}
+        />
+      )}
+
+      {step === "countdown" && stream && (
+        <CountdownStep stream={stream} firstLine={lines[0]} onDone={beginScript} onCancel={() => setStep("align")} />
       )}
 
       {step === "script" && stream && (
         <>
-          <FlowHeader title="Face and voice" step="Step 2 of 2" onBack={restartRecording} />
           {camera && (
             <FaceWatch
               camera={camera}
@@ -578,58 +809,62 @@ export function CaptureFlow() {
       )}
 
       {step === "review" && recording && (
-        <>
-          <FlowHeader
-            title="Review"
-            onBack={() => setStep("camera")}
-          />
-          <ReviewStep
-            recording={recording}
-            consent={consent}
-            onConsent={setConsent}
-            error={reviewError}
-            notice={reviewNotice}
-            onPlayable={(playable) =>
-              // Whether this browser could play its own take back travels with
-              // the checks, so the team hears about a damaged file.
-              setRecording((r) => {
-                if (!r) return r
-                const checks = markPlayable(r.checks, playable)
-                return checks === r.checks ? r : { ...r, checks }
-              })
-            }
-            onSubmit={submitRecording}
-            onRedo={() => setStep("camera")}
-          />
-        </>
+        <ReviewStep
+          recording={recording}
+          error={reviewError}
+          notice={reviewNotice}
+          onPlayable={(playable) =>
+            // Whether this browser could play its own take back travels with
+            // the checks, so the team hears about a damaged file.
+            setRecording((r) => {
+              if (!r) return r
+              const checks = markPlayable(r.checks, playable)
+              return checks === r.checks ? r : { ...r, checks }
+            })
+          }
+          onUse={useRecording}
+          onRedo={() => toCamera("align")}
+        />
       )}
 
       {step === "topic" && (
-        <>
-          <AccountHeader />
-          <UploadBanner
-            state={uploadState}
-            onRetry={() => recording && startUpload(recording)}
-          />
-          <TopicStep
-            topicId={topicId}
-            ownTopic={ownTopic}
-            onTopic={setTopicId}
-            onOwnTopic={setOwnTopic}
-            canSubmit={Boolean(topicTitle) && uploadState.status !== "failed"}
-            sending={sending}
-            waitingForUpload={sending && uploadState.status === "uploading"}
-            error={sendError}
-            onSubmit={() => void makeSample()}
-          />
-        </>
+        <TopicStep
+          topicId={topicId}
+          ownTopic={ownTopic}
+          onTopic={(id) => {
+            setTopicId(id)
+            setSendError(null)
+          }}
+          onOwnTopic={(value) => {
+            setOwnTopic(value)
+            setSendError(null)
+          }}
+          canContinue={Boolean(topicTitle)}
+          onContinue={() => setStep("submit")}
+        />
+      )}
+
+      {step === "submit" && recording && photo && (
+        <SubmitStep
+          photo={photo}
+          recording={recording}
+          profile={profile}
+          topicTitle={topicTitle}
+          consent={consent}
+          onConsent={setConsent}
+          sending={sending}
+          upload={uploadState}
+          error={sendError ?? (uploadState.status === "failed" ? uploadFailureText(uploadState) : null)}
+          onSubmit={() => void makeSample()}
+          onRetakePhoto={() => openStep(1)}
+          onRecordAgain={() => toCamera("align")}
+          onChangeTopic={() => setStep("topic")}
+          onEditDetails={() => setStep("about")}
+        />
       )}
 
       {step === "done" && (
-        <>
-          <AccountHeader />
-          <DoneStep email={profile.email} topicTitle={sent?.topicTitle ?? topicTitle} onAnother={startAnother} />
-        </>
+        <DoneStep email={profile.email} topicTitle={sent?.topicTitle ?? topicTitle} onAnother={startAnother} />
       )}
     </Page>
   )
@@ -656,165 +891,81 @@ function AboutStep({ initial, onContinue }: { initial: StudioProfile; onContinue
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[528px] flex-grow flex-col gap-8 px-(--page-pad) pt-12 pb-16 sm:pt-24">
-      <Display>About you</Display>
-      <form onSubmit={submit} className="flex flex-col gap-8">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-2">
-            <Field
-              id="email"
-              label="Email"
-              type="email"
-              autoComplete="email"
-              placeholder="you@firm.com"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                setEmailError(null)
-              }}
-            />
-            {emailError && <ErrorText>{emailError}</ErrorText>}
-          </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-6">
-            <Field id="first-name" label="First name" autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-            <Field id="last-name" label="Last name" autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-          </div>
-          <Field
-            id="firm"
-            label="Firm name"
-            autoComplete="organization"
-            placeholder="Lopez Immigration"
-            value={firm}
-            onChange={(e) => setFirm(e.target.value)}
-          />
+    <main className="mx-auto flex w-full max-w-[1120px] flex-grow flex-wrap items-start gap-10 px-(--page-pad) pt-10 pb-16 sm:gap-14 sm:pt-16">
+      <div className="flex min-w-0 flex-[999_1_420px] flex-col gap-8 lg:max-w-[520px]">
+        <div className="flex flex-col gap-3">
+          <MonoLabel className="text-[#4d5a48]">Your sample video · free</MonoLabel>
+          <Display>Tell us about you</Display>
         </div>
-        <PrimaryButton type="submit" disabled={!ready} className="self-start">
-          Continue
-        </PrimaryButton>
-      </form>
+        <form onSubmit={submit} className="flex flex-col gap-8">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+              <Field
+                id="email"
+                label="Email"
+                type="email"
+                autoComplete="email"
+                placeholder="alex@visaflo.ca"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setEmailError(null)
+                }}
+              />
+              {emailError && <ErrorText>{emailError}</ErrorText>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field id="first-name" label="First name" autoComplete="given-name" placeholder="Alex" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              <Field id="last-name" label="Last name" autoComplete="family-name" placeholder="Kim" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+            <Field
+              id="firm"
+              label="Firm name"
+              autoComplete="organization"
+              placeholder="VisaFlo Immigration"
+              value={firm}
+              onChange={(e) => setFirm(e.target.value)}
+            />
+          </div>
+          <PrimaryButton type="submit" disabled={!ready} className="self-start px-10">
+            Continue
+          </PrimaryButton>
+        </form>
+      </div>
+      <WhatsNext />
     </main>
   )
 }
 
-const TIPS = [
-  { icon: Lightbulb, text: "Face a window or lamp" },
-  { icon: VolumeX, text: "Quiet room" },
-  { icon: Monitor, text: "Camera at eye level" },
-  { icon: ImageIcon, text: "Plain wall behind you" },
+const NEXT = [
+  { icon: Camera, label: "Take a photo", meta: "A few seconds" },
+  { icon: Video, label: "Take a video", meta: "About 30 seconds" },
+  { icon: Newspaper, label: "Pick a topic", meta: "This week's news" },
+  { icon: Send, label: "Submit", meta: "We email your sample" },
 ]
 
-function SetupStep({ firm, onStart, onEditProfile }: { firm: string; onStart: () => void; onEditProfile: () => void }) {
-  const rows = [
-    { label: "Face and voice", meta: "About 2 min" },
-    { label: "Pick a topic", meta: "This week's IRCC news" },
-    { label: "Get your sample", meta: "We email it to you" },
-  ]
+function WhatsNext() {
   return (
-    <main className="mx-auto grid w-full max-w-[1120px] flex-grow grid-cols-[repeat(auto-fit,minmax(min(400px,100%),1fr))] content-start items-start gap-10 px-(--page-pad) pt-10 pb-16 sm:gap-16 sm:pt-20">
-      <div className="flex flex-col gap-8">
-        <div className="flex flex-col gap-4">
-          {firm && (
-            <button
-              type="button"
-              onClick={onEditProfile}
-              title="Edit your details"
-              className="self-start bg-stone-950 px-1.5 py-0.5 font-mono text-[12px] font-bold tracking-[0.1em] text-white uppercase"
-            >
-              {firm}
-            </button>
-          )}
-          <Display>Your sample video</Display>
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            First we record you, vertical like a phone video: fit your face in the frame, then read a short
-            script out loud. It takes about 2 minutes.
-          </p>
-        </div>
-        <ol className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
-          {rows.map((row, i) => (
-            <li key={row.label} className="flex items-center gap-4 border-b border-stone-200 py-4">
-              <span
-                className={cn(
-                  "flex size-8 shrink-0 items-center justify-center font-mono text-[14px]",
-                  i === 0 ? "bg-stone-950 text-white" : "border border-stone-300 text-stone-600",
-                )}
-              >
-                {i + 1}
-              </span>
-              <span className={cn("flex-grow text-[16px] font-medium", i > 0 && "text-stone-700")}>{row.label}</span>
-              <span className="text-right text-[14px] text-stone-600">{row.meta}</span>
-            </li>
-          ))}
-        </ol>
-        <PrimaryButton type="button" onClick={onStart} className="self-start">
-          Start recording
-        </PrimaryButton>
-      </div>
-      <aside aria-label="Before you record" className="flex flex-col gap-4 border border-stone-200 bg-stone-50 p-6 sm:p-8">
-        <h2 className="m-0 text-[16px] font-semibold">Before you record</h2>
-        <ul className="m-0 flex list-none flex-col gap-4 p-0">
-          {TIPS.map(({ icon: Icon, text }) => (
-            <li key={text} className="flex items-center gap-3 text-[16px]">
-              <Icon className="size-5 text-stone-700" strokeWidth={1.6} aria-hidden />
-              {text}
-            </li>
-          ))}
-        </ul>
-      </aside>
-    </main>
+    <aside aria-label="What to do next" className="flex min-w-0 flex-[1_1_340px] flex-col gap-6 border border-stone-200 bg-stone-50 p-6 sm:p-7">
+      <h2 className="m-0 text-[16px] font-semibold">What to do next (about 1 minute)</h2>
+      <ul className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
+        {NEXT.map(({ icon: Icon, ...row }) => (
+          <li key={row.label} className="flex items-center gap-3.5 border-b border-stone-200 py-3.5">
+            <Icon className="size-5 shrink-0 text-stone-700" strokeWidth={1.6} aria-hidden />
+            <span className="flex-grow text-[16px] font-medium">{row.label}</span>
+            <span className="text-right text-[14px] text-stone-600">{row.meta}</span>
+          </li>
+        ))}
+      </ul>
+    </aside>
   )
 }
 
-function UploadBanner({ state, onRetry }: { state: UploadState; onRetry: () => void }) {
-  if (state.status === "idle" || state.status === "done") return null
-  const percent = Math.round(state.progress * 100)
-  return (
-    <div
-      role={state.status === "failed" ? "alert" : "status"}
-      className="shrink-0 border-b border-stone-200 bg-stone-50"
-    >
-      <div className="mx-auto flex w-full max-w-[816px] items-center gap-3 px-(--page-pad) py-3 text-[14px] sm:gap-4">
-        {state.status === "failed" ? (
-          <>
-            <TriangleAlert className="size-5 shrink-0 text-[#c2410c]" strokeWidth={1.8} aria-hidden />
-            {state.reason === "refused" ? (
-              <span className="flex-grow">
-                <span className="font-medium">We couldn&apos;t save your recording.</span>{" "}
-                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
-              </span>
-            ) : state.reason === "other" ? (
-              <span className="flex-grow">
-                <span className="font-medium">We couldn&apos;t save your recording ({state.code}).</span>{" "}
-                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
-              </span>
-            ) : (
-              <span className="flex-grow">
-                <span className="font-medium">Upload stopped at {percent}%.</span>{" "}
-                <span className="text-stone-600">Check your connection. Your recording is saved.</span>
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onRetry}
-              className="flex h-11 items-center border border-stone-950 px-4 font-medium hover:bg-white"
-            >
-              Retry
-            </button>
-          </>
-        ) : (
-          <>
-            <span className="whitespace-nowrap text-stone-700">Uploading recording</span>
-            <span className="relative h-1 flex-grow overflow-hidden bg-stone-200">
-              <span
-                className="absolute inset-y-0 left-0 bg-stone-950 transition-[width]"
-                style={{ width: `${percent}%` }}
-              />
-            </span>
-            <span className="font-mono text-stone-700">{percent}%</span>
-          </>
-        )}
-      </div>
-    </div>
-  )
+// What a failed upload says on the Submit screen; Make my sample tries again.
+function uploadFailureText(state: UploadFailure): string {
+  if (state.reason === "network") return "The upload stopped. Check your connection, then press Make my sample again. Keep this page open."
+  const code = state.reason === "other" ? ` (${state.code})` : ""
+  return `We couldn't upload your photo and video${code}. Press Make my sample to try again. Still stuck? Email info@vflo.app.`
 }
 
 function TopicStep({
@@ -822,32 +973,26 @@ function TopicStep({
   ownTopic,
   onTopic,
   onOwnTopic,
-  canSubmit,
-  sending,
-  waitingForUpload,
-  error,
-  onSubmit,
+  canContinue,
+  onContinue,
 }: {
   topicId: string | null
   ownTopic: string
   onTopic: (id: string) => void
   onOwnTopic: (value: string) => void
-  canSubmit: boolean
-  sending: boolean
-  waitingForUpload: boolean
-  error: string | null
-  onSubmit: () => void
+  canContinue: boolean
+  onContinue: () => void
 }) {
-  const options = [...TOPICS, { id: OWN_TOPIC_ID, title: "Something else", detail: "Your topic, your angle" }]
+  const options = [...TOPICS, { id: OWN_TOPIC_ID, title: "Something else", detail: "Your own topic" }]
   return (
-    <main className="mx-auto flex w-full max-w-[816px] flex-grow flex-col gap-8 px-(--page-pad) py-10 sm:py-16">
-      <div className="flex flex-col gap-4">
-        <Display>Pick a topic</Display>
+    <main className="mx-auto flex w-full max-w-[720px] flex-grow flex-col gap-7 px-(--page-pad) pt-10 pb-16 sm:pt-12">
+      <div className="flex flex-col gap-2.5">
+        <Display className="sm:text-[48px]">Pick this week&apos;s topic</Display>
         <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-          We&apos;ll use the freshest update in the area you pick.
+          We make your sample from the newest IRCC update in the area you pick.
         </p>
       </div>
-      <fieldset className="m-0 grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-3 border-0 p-0">
+      <fieldset className="m-0 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3 border-0 p-0">
         <legend className="sr-only">Topic for your sample video</legend>
         {options.map((topic) => {
           const selected = topicId === topic.id
@@ -855,21 +1000,13 @@ function TopicStep({
             <label
               key={topic.id}
               className={cn(
-                "flex cursor-pointer items-start gap-3 border p-5",
-                selected ? "border-stone-950" : "border-stone-200 hover:border-stone-400",
+                "flex min-h-[92px] cursor-pointer flex-col justify-center gap-1.5 px-[18px] py-4 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-stone-950",
+                selected ? "border-2 border-stone-950" : "border border-stone-300 hover:border-stone-500",
               )}
             >
-              <input
-                type="radio"
-                name="topic"
-                checked={selected}
-                onChange={() => onTopic(topic.id)}
-                className="mt-0.5 size-5 shrink-0 accent-stone-950"
-              />
-              <span className="flex flex-col gap-1">
-                <span className="text-[16px] leading-[1.4] font-medium">{topic.title}</span>
-                <span className="text-[14px] text-stone-600">{topic.detail}</span>
-              </span>
+              <input type="radio" name="topic" checked={selected} onChange={() => onTopic(topic.id)} className="sr-only" />
+              <span className="font-mono text-[11px] tracking-[0.1em] text-stone-500 uppercase">{topic.detail}</span>
+              <span className="text-[17px] leading-[1.35] font-medium">{topic.title}</span>
             </label>
           )
         })}
@@ -877,7 +1014,7 @@ function TopicStep({
       {topicId === OWN_TOPIC_ID && (
         <Field
           id="own-topic"
-          label="What should the video be about?"
+          label="Your topic"
           placeholder="e.g. Common reasons visitor visas get refused"
           value={ownTopic}
           maxLength={300}
@@ -885,45 +1022,171 @@ function TopicStep({
           autoFocus
         />
       )}
-      {error && <ErrorText>{error}</ErrorText>}
-      <PrimaryButton type="button" disabled={!canSubmit || sending} onClick={onSubmit} className="self-start">
-        {waitingForUpload ? "Finishing upload…" : sending ? "Sending…" : "Make my sample"}
+      <PrimaryButton type="button" disabled={!canContinue} onClick={onContinue} className="self-start px-10">
+        Continue
       </PrimaryButton>
     </main>
   )
 }
 
+// One look at everything before it goes: the photo, the take, the topic and
+// who it's for, each with a way back to change it.
+function SubmitStep({
+  photo,
+  recording,
+  profile,
+  topicTitle,
+  consent,
+  onConsent,
+  sending,
+  upload,
+  error,
+  onSubmit,
+  onRetakePhoto,
+  onRecordAgain,
+  onChangeTopic,
+  onEditDetails,
+}: {
+  photo: Photo
+  recording: Recording
+  profile: StudioProfile
+  topicTitle: string
+  consent: boolean
+  onConsent: (value: boolean) => void
+  sending: boolean
+  upload: UploadState
+  error: string | null
+  onSubmit: () => void
+  onRetakePhoto: () => void
+  onRecordAgain: () => void
+  onChangeTopic: () => void
+  onEditDetails: () => void
+}) {
+  // Nothing can change while the request goes out: it was read when Make my
+  // sample was pressed.
+  const edit =
+    "flex h-8 items-center text-[14px] text-stone-600 underline underline-offset-[3px] enabled:hover:text-stone-950 disabled:cursor-not-allowed disabled:text-stone-400 disabled:no-underline"
+  return (
+    <main className="mx-auto flex w-full max-w-[880px] flex-grow flex-col gap-7 px-(--page-pad) pt-10 pb-16 sm:pt-12">
+      <div className="flex flex-col gap-2.5">
+        <Display className="sm:text-[48px]">Ready to make your sample?</Display>
+        <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
+          Check everything once. We&apos;ll make it and email you.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="flex flex-col border border-stone-200">
+          <div className="aspect-[9/16] max-h-[300px] overflow-hidden bg-stone-900">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing for next/image to optimise */}
+            <img src={photo.url} alt="Your portrait photo" className="size-full -scale-x-100 object-cover" />
+          </div>
+          <div className="flex items-center justify-between gap-2 px-3.5 py-3">
+            <span className="text-[15px] font-medium">Photo</span>
+            <button type="button" onClick={onRetakePhoto} disabled={sending} className={edit}>
+              Retake
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col border border-stone-200">
+          <div className="aspect-[9/16] max-h-[300px] overflow-hidden bg-stone-900">
+            <video src={recording.url} controls playsInline preload="metadata" className="size-full object-cover" />
+          </div>
+          <div className="flex items-center justify-between gap-2 px-3.5 py-3">
+            <span className="text-[15px] font-medium">Video</span>
+            <button type="button" onClick={onRecordAgain} disabled={sending} className={edit}>
+              Record again
+            </button>
+          </div>
+        </div>
+        <dl className="col-span-2 m-0 flex min-w-0 flex-col gap-4 border border-stone-200 p-5">
+          <div className="flex flex-col gap-1">
+            <dt className="font-mono text-[11px] tracking-[0.1em] text-stone-500 uppercase">Topic</dt>
+            <dd className="m-0 text-[17px] font-medium">{topicTitle}</dd>
+          </div>
+          <div className="flex flex-col gap-1">
+            <dt className="font-mono text-[11px] tracking-[0.1em] text-stone-500 uppercase">You</dt>
+            <dd className="m-0 text-[16px]">
+              {fullName(profile.firstName, profile.lastName)} · {profile.firm}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-1">
+            <dt className="font-mono text-[11px] tracking-[0.1em] text-stone-500 uppercase">We email it to</dt>
+            <dd className="m-0 text-[16px] break-all">{profile.email}</dd>
+          </div>
+          <div className="mt-auto flex gap-5">
+            <button type="button" onClick={onChangeTopic} disabled={sending} className={edit}>
+              Change topic
+            </button>
+            <button type="button" onClick={onEditDetails} disabled={sending} className={edit}>
+              Edit details
+            </button>
+          </div>
+        </dl>
+      </div>
+      <label className="flex cursor-pointer items-start gap-3 text-[15px] leading-[1.45] text-stone-700">
+        <input
+          type="checkbox"
+          checked={consent}
+          disabled={sending}
+          onChange={(e) => onConsent(e.target.checked)}
+          className="m-0 mt-0.5 size-[18px] shrink-0 accent-stone-950"
+        />
+        <span>{CONSENT_TEXT}</span>
+      </label>
+      {error && <ErrorText>{error}</ErrorText>}
+      <PrimaryButton type="button" disabled={!topicTitle || !consent || sending} onClick={onSubmit} className="self-start px-10">
+        {sending && upload.status === "uploading"
+          ? `Uploading… ${Math.round(upload.progress * 100)}%`
+          : sending
+            ? "Sending…"
+            : "Make my sample"}
+      </PrimaryButton>
+    </main>
+  )
+}
+
+function DoneRow({ children }: { children: ReactNode }) {
+  return (
+    <li className="flex items-center gap-3.5 border-b border-stone-200 py-4">
+      <span className="flex size-8 shrink-0 items-center justify-center bg-[#eef0e9]">
+        <DoneMark className="size-4 stroke-[#3a4536]" />
+      </span>
+      {children}
+    </li>
+  )
+}
+
 function DoneStep({ email, topicTitle, onAnother }: { email: string; topicTitle: string; onAnother: () => void }) {
   return (
-    <main className="mx-auto grid w-full max-w-[1120px] flex-grow grid-cols-[repeat(auto-fit,minmax(min(400px,100%),1fr))] content-start items-start gap-10 px-(--page-pad) pt-12 pb-16 sm:gap-16 sm:pt-20">
-      <div className="flex flex-col gap-4">
+    <main className="mx-auto flex w-full max-w-[1120px] flex-grow flex-wrap items-start gap-10 px-(--page-pad) pt-12 pb-16 sm:gap-14 sm:pt-20">
+      <div className="flex flex-[1_1_380px] flex-col gap-4">
         <Display>Your sample is in the works</Display>
         <p className="m-0 text-[18px] leading-[1.5] text-stone-600">
           We&apos;ll email <span className="font-medium text-stone-950">{email}</span> when it&apos;s ready.
         </p>
       </div>
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-[1_1_380px] flex-col gap-7">
         <ol className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
-          <li className="flex items-center gap-4 border-b border-stone-200 py-4">
-            <span className="flex size-8 shrink-0 items-center justify-center bg-[#eef0e9]">
-              <DoneMark className="size-4 stroke-[#3a4536]" />
-            </span>
-            <span className="flex-grow text-[16px] font-medium">Face and voice</span>
-          </li>
-          <li className="flex items-center gap-4 border-b border-stone-200 py-4">
-            <span className="flex size-8 shrink-0 items-center justify-center bg-[#eef0e9]">
-              <DoneMark className="size-4 stroke-[#3a4536]" />
-            </span>
-            <span className="flex flex-grow flex-col gap-1">
+          <DoneRow>
+            <span className="text-[16px] font-medium">Portrait photo</span>
+          </DoneRow>
+          <DoneRow>
+            <span className="text-[16px] font-medium">Portrait video</span>
+          </DoneRow>
+          <DoneRow>
+            <span className="flex flex-col gap-0.5">
               <span className="text-[16px] font-medium">Topic</span>
               {topicTitle && <span className="text-[14px] text-stone-600">{topicTitle}</span>}
             </span>
-          </li>
-          <li className="flex items-center gap-4 border-b border-stone-200 py-4">
-            <span className="flex size-8 shrink-0 items-center justify-center bg-stone-950 font-mono text-[14px] text-white">
-              3
+          </DoneRow>
+          <DoneRow>
+            <span className="text-[16px] font-medium">Submitted</span>
+          </DoneRow>
+          <li className="flex items-center gap-3.5 border-b border-stone-200 py-4">
+            <span className="flex size-8 shrink-0 items-center justify-center bg-stone-950 font-mono text-[14px] text-white" aria-hidden>
+              →
             </span>
-            <span className="flex flex-grow flex-col gap-1">
+            <span className="flex flex-col gap-0.5">
               <span className="text-[16px] font-medium">Your sample</span>
               <span className="text-[14px] text-stone-600">In progress</span>
             </span>

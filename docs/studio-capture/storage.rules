@@ -19,8 +19,8 @@ service firebase.storage {
     }
 
     // VisaFlo Studio (studio.visaflo.ca/start): anyone, no sign-in, uploads
-    // the face and voice recording for their sample video into a new
-    // studio/{submissionId}/ folder. Create only: no overwriting, and no
+    // the portrait photo and the face and voice recording for their sample
+    // video into a new studio/{submissionId}/ folder. Create only: no overwriting, and no
     // browser can list, read or delete anything under studio/. The server
     // writes request.json next to it and emails the team
     // (app/api/studio/requests); the admin pages (studio.visaflo.ca/admin)
@@ -34,9 +34,14 @@ service firebase.storage {
       // emulator lets one through), so say it outright.
       allow create: if resource == null
                     && submissionId.matches('[0-9]{8}T[0-9]{6}-[0-9a-f]{8}')
-                    && fileName.matches('recording[.](mp4|webm|mov|m4v)')
-                    && request.resource.size < 500 * 1024 * 1024
-                    && request.resource.contentType.matches('video/.*');
+                    && (
+                      (fileName.matches('recording[.](mp4|webm|mov|m4v)')
+                        && request.resource.size < 500 * 1024 * 1024
+                        && request.resource.contentType.matches('video/.*'))
+                      || (fileName == 'photo.jpg'
+                        && request.resource.size < 10 * 1024 * 1024
+                        && request.resource.contentType == 'image/jpeg')
+                    );
     }
 
     // Before /start dropped sign-in (2026-10): a signed-in person's own

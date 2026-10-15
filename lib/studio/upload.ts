@@ -1,24 +1,19 @@
 "use client"
 
-import { ref, uploadBytesResumable, type UploadTask } from "firebase/storage"
+import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebase/storage"
 
 import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
-import { extensionFor, type Recording } from "@/lib/studio/recorder"
+import { PHOTO_MIME } from "@/lib/studio/photo"
+import { photoPath, recordingPath } from "@/lib/studio/paths"
+import type { Recording } from "@/lib/studio/recorder"
 
-// Everything for one sample lives under studio/{submissionId}/ in the
-// VisaFlo bucket. Nobody signs in on /start: the storage rules let a browser
-// create the recording there and nothing else (no overwrite, no reading);
-// the server writes request.json next to it (app/api/studio/requests).
-export function submissionFolder(submissionId: string): string {
-  return `studio/${submissionId}`
-}
+export { newSubmissionId, photoPath, recordingPath } from "@/lib/studio/paths"
 
-// The UTC time to the second, then 8 hex characters: SUBMISSION_ID in
-// lib/studio/project.ts, which the rules and the server check.
-export function newSubmissionId(): string {
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)
-  return `${stamp}-${crypto.randomUUID().slice(0, 8)}`
+// The photo is small, so one request. The rules refuse a second upload of
+// either file to the same submission (see upload-plan.ts).
+export async function uploadPhoto(email: string, submissionId: string, photo: Blob): Promise<void> {
+  await uploadBytes(ref(studioStorage(), photoPath(submissionId)), photo, { contentType: PHOTO_MIME, customMetadata: { email } })
 }
 
 export type UploadHandle = {
@@ -33,7 +28,7 @@ export function uploadRecording(
   recording: Recording,
   onProgress: (fraction: number) => void,
 ): UploadHandle {
-  const path = `${submissionFolder(submissionId)}/recording.${extensionFor(recording.mime)}`
+  const path = recordingPath(submissionId, recording)
   const task: UploadTask = uploadBytesResumable(ref(studioStorage(), path), recording.blob, {
     contentType: recording.mime.split(";")[0],
     customMetadata: {
@@ -59,6 +54,7 @@ export type SampleRequest = {
   recordingSeconds: number
   recordingSource: Recording["source"]
   checks: Recording["checks"]
+  photoPath: string
   email: string
   firstName: string
   lastName: string
@@ -69,8 +65,8 @@ export type SampleRequest = {
   consentAt: string
 }
 
-// The server checks the recording is in the bucket, keeps the request as
-// request.json next to it and emails the team.
+// The server checks the recording (and the photo, when sent) are in the
+// bucket, keeps the request as request.json next to them and emails the team.
 export async function submitSampleRequest(request: SampleRequest): Promise<void> {
   const response = await fetch("/api/studio/requests", {
     method: "POST",

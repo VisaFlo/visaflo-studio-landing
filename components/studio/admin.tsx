@@ -117,7 +117,10 @@ function SubmissionRow({ user, submission: s }: { user: User; submission: Submis
         </Link>
       </td>
       <td className="py-2 whitespace-nowrap">
-        {s.recording && <DownloadRecording user={user} id={s.id} kind="secondary" className="h-9 px-3 text-[13px]" />}
+        <div className="flex gap-2">
+          {s.recording && <DownloadRecording user={user} id={s.id} kind="secondary" className="h-9 px-3 text-[13px]" />}
+          {s.photo && <DownloadRecording user={user} id={s.id} file="photo" kind="secondary" className="h-9 px-3 text-[13px]" />}
+        </div>
       </td>
     </tr>
   )

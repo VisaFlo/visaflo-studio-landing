@@ -1,21 +1,31 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Camera, CameraOff, Mic, Play, Square, Sun, TriangleAlert } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Camera, CameraOff, Mic, Play, Square, TriangleAlert, X } from "lucide-react"
 
-import { CameraVideo, PortraitFrame } from "@/components/studio/camera-frame"
-import { DoneMark, FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
-import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
+import {
+  CameraVideo,
+  FullScreenStage,
+  PreviewBadge,
+  ShotButton,
+  ShotFrame,
+  ShotLayout,
+  StatusPill,
+} from "@/components/studio/camera-frame"
+import { FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
+import { lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
 import type { Check } from "@/lib/studio/checks"
 import { checkAlignment, type AlignCheck, type FaceFrame } from "@/lib/studio/face-tracker"
+import type { Photo } from "@/lib/studio/photo"
 import type { Recording } from "@/lib/studio/recorder"
 import { startRecognizer, speechRecognitionSupported } from "@/lib/studio/speech-recognizer"
 import { useFaceFrames } from "@/lib/studio/use-face-frames"
 import { advancePointer, indexScript, lineOfWord, tokenize } from "@/lib/studio/word-follow"
 import { cn } from "@/lib/utils"
 
-// Camera steps: the preview takes the big left area on desktop and sits
-// between the title and the controls on a phone.
+// The camera permission screens (Allow, Blocked): a placeholder frame takes
+// the big left area on desktop and sits between the title and the controls
+// on a phone.
 function StageLayout({ title, stage, children }: { title: ReactNode; stage: ReactNode; children: ReactNode }) {
   return (
     <main className="mx-auto grid w-full max-w-[1280px] flex-grow content-center gap-6 px-(--page-pad) py-6 sm:py-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:gap-x-12 lg:gap-y-6 lg:py-12">
@@ -23,41 +33,6 @@ function StageLayout({ title, stage, children }: { title: ReactNode; stage: Reac
       <div className="flex min-w-0 items-center justify-center lg:col-start-1 lg:row-span-2 lg:row-start-1">{stage}</div>
       <div className="flex flex-col gap-6 lg:col-start-2 lg:self-start">{children}</div>
     </main>
-  )
-}
-
-const CAPTURE_STEPS = ["Fit your face", "Read the script"]
-
-// The two parts of the recording, named, so it's clear what comes next.
-export function CaptureStepper({ current, progress = 0 }: { current: 0 | 1; progress?: number }) {
-  return (
-    <ol className="m-0 grid list-none grid-cols-2 gap-1 p-0" aria-label="Recording steps">
-      {CAPTURE_STEPS.map((label, i) => (
-        <li key={label} aria-current={i === current ? "step" : undefined} className="flex flex-col gap-2">
-          <span className="relative h-1 overflow-hidden bg-stone-200">
-            <span
-              className="absolute inset-y-0 left-0 bg-stone-950 transition-[width] duration-300"
-              style={{ width: i < current ? "100%" : i === current ? `${Math.max(8, Math.round(progress * 100))}%` : "0%" }}
-            />
-          </span>
-          <span
-            className={cn(
-              "flex items-center gap-1.5 text-[12px] leading-tight sm:text-[13px]",
-              i === current ? "font-medium text-stone-950" : i < current ? "text-stone-600" : "text-stone-400",
-            )}
-          >
-            {i < current && <DoneMark className="size-3.5 shrink-0" />}
-            {label}
-          </span>
-        </li>
-      ))}
-    </ol>
-  )
-}
-
-function PreviewStage({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative flex w-full items-center justify-center bg-stone-100 py-6 sm:py-8 lg:h-[620px]">{children}</div>
   )
 }
 
@@ -194,27 +169,12 @@ export function CameraBlockedStep({ onRetry }: { onRetry: () => void }) {
   )
 }
 
-function CheckRow({ label, ok, hint }: { label: string; ok: boolean | null; hint?: ReactNode }) {
-  return (
-    <li className="flex items-center justify-between border-b border-stone-200 py-3 text-[16px]">
-      <span>{label}</span>
-      {ok === null ? (
-        <span className="text-[14px] text-stone-500">Checking…</span>
-      ) : ok ? (
-        <DoneMark />
-      ) : (
-        <span className="flex items-center gap-2 text-[14px] font-medium text-[#c2410c]">{hint}</span>
-      )}
-    </li>
-  )
-}
-
 const COUNTDOWN_SECONDS = 3
 
 // Keeps the face detector running, off-screen, while the script is read, so
 // the review and the team can tell whether a face was in the camera's view
 // while recording. It is a found/not-found tally on the raw camera frame
-// (wider than the recorded crop on a laptop), not the oval check. The flow
+// (wider than the recorded crop on a laptop), not the framing check. The flow
 // tallies the readings; with fewer than FACE_MIN_FRAMES of them the framing
 // step's own reading stands (checks.ts).
 export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (frame: FaceFrame) => void }) {
@@ -228,159 +188,169 @@ export function FaceWatch({ camera, onFrame }: { camera: MediaStream; onFrame: (
 // `stream`: MediaPipe's detectForVideo threw on the canvas-captured stream
 // (Chrome on macOS, @mediapipe/tasks-vision 1.1; see commit c5270eb). If a
 // later version accepts it, this indirection can go. readFace measures
-// inside the same 9:16 crop, so the oval check matches the preview.
+// inside the same 9:16 crop, so the check matches the preview.
+//
+// The camera screen before the portrait photo and before the video, like
+// HeyGen's: the big vertical preview, one pill saying what to fix (or that
+// all is set), and two small buttons right under it. The check never blocks:
+// it advises, and its reading travels with the take. For the video, Start
+// recording opens the full-screen countdown (CountdownStep).
 export function AlignStep({
   stream,
   camera,
+  purpose,
   onStart,
+  onCancel,
+  onTips,
 }: {
   stream: MediaStream
   camera: MediaStream
-  /** faceSeen is null when the tracker never ran, so nothing is claimed. */
-  onStart: (result: { faceSeen: Check }) => void
+  purpose: "photo" | "video"
+  /**
+   * faceSeen is null when the tracker never ran, so nothing is claimed.
+   * `preview` is the vertical preview's video, for the photo to be taken from.
+   */
+  onStart: (result: { faceSeen: Check; preview: HTMLVideoElement | null }) => void
+  onCancel: () => void
+  /** Back to the guidelines for this capture. */
+  onTips: () => void
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [check, setCheck] = useState<AlignCheck | null>(null)
-  const [countdown, setCountdown] = useState<number | null>(null)
-  const [canSkip, setCanSkip] = useState(false)
   const faceSeen = useRef(false)
-  const allOkSince = useRef<number | null>(null)
-  const faceOkSince = useRef<number | null>(null)
-  const readySince = useRef<number | null>(null)
-  const started = useRef(false)
-  const startRef = useRef<() => void>(() => {})
+  const preview = useRef<HTMLVideoElement | null>(null)
+  const onPreview = useCallback((el: HTMLVideoElement | null) => {
+    preview.current = el
+  }, [])
+  const photo = purpose === "photo"
 
   const status = useFaceFrames(video, (frame) => {
-    if (started.current) return
-    const result = checkAlignment(frame)
-    setCheck(result)
-    const now = performance.now()
     if (frame.found) faceSeen.current = true
-    const faceOk = Boolean(result?.inFrame && result.distance === "ok")
-    faceOkSince.current = faceOk ? (faceOkSince.current ?? now) : null
-    allOkSince.current = faceOk && result?.light ? (allOkSince.current ?? now) : null
-    // A dim room shouldn't stop anyone: after 8 seconds framed well, light
-    // becomes advice rather than a blocker.
-    const ready = Boolean(
-      (allOkSince.current && now - allOkSince.current > 400) ||
-        (faceOkSince.current && now - faceOkSince.current > 8000),
-    )
-    // Like Face ID: once everything checks out, count down and start on our
-    // own. Moving out of frame cancels the countdown.
-    if (!ready) {
-      readySince.current = null
-      setCountdown(null)
-      return
-    }
-    readySince.current ??= now
-    const left = COUNTDOWN_SECONDS - Math.floor((now - readySince.current) / 1000)
-    if (left <= 0) startRef.current()
-    else setCountdown(left)
+    setCheck(checkAlignment(frame))
   })
 
-  // Glasses, odd light or a slow phone can keep the checks from passing.
-  // After 25 seconds, let the person carry on anyway.
-  useEffect(() => {
-    const id = window.setTimeout(() => setCanSkip(true), 25_000)
-    return () => window.clearTimeout(id)
-  }, [])
-
-  const unavailable = status === "unavailable"
   const live = status === "ready"
-  const aligned = Boolean(check?.inFrame && check.distance === "ok")
+  const allSet = live && Boolean(check?.inFrame && check.distance === "ok" && check.light)
+  // One thing to fix at a time, the way it is easiest to act on.
+  const pill: { text: string; ok: boolean } | null = !live
+    ? status === "loading"
+      ? { text: "Checking your camera…", ok: false }
+      : null
+    : allSet
+      ? { text: "You're all set", ok: true }
+      : !check?.inFrame
+        ? { text: "Center your face", ok: false }
+        : check.distance === "back"
+          ? { text: "Move back a little", ok: false }
+          : check.distance !== "ok"
+            ? { text: "Move closer", ok: false }
+            : { text: "Face a window or lamp", ok: false }
 
-  function start() {
-    if (started.current) return
-    started.current = true
-    try {
-      // Without live tracking there is no reading: "not checked", not "seen".
-      onStart({ faceSeen: status === "ready" ? faceSeen.current : null })
-    } catch (error) {
-      // Defensive: the flow's onStart handles its own failures today, but if
-      // it ever throws, the button must work again rather than stay dead.
-      started.current = false
-      throw error
-    }
+  function begin() {
+    // Without live tracking there is no reading: "not checked", not "seen".
+    onStart({ faceSeen: live ? faceSeen.current : null, preview: preview.current })
   }
 
-  useEffect(() => {
-    startRef.current = start
-  })
-
   return (
-    <StageLayout
-      title={
+    <ShotLayout
+      frame={
+        <ShotFrame>
+          <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
+          <CameraVideo stream={stream} onVideo={onPreview} className="size-full object-cover" />
+          <PreviewBadge />
+          {pill && <StatusPill tone={pill.ok ? "ok" : "plain"}>{pill.text}</StatusPill>}
+        </ShotFrame>
+      }
+      buttons={
         <>
-          <CaptureStepper current={0} />
-          <FlowTitle>Fit your face in the oval</FlowTitle>
-          <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-            {unavailable
-              ? "This vertical frame is what your video will use. Hold your phone upright, or sit an arm's length from your laptop, facing a window or lamp. Press the button when you're in the oval."
-              : "This vertical frame is what your video will use. Sit an arm's length away. When all three are checked, recording starts on its own."}
-          </p>
+          <ShotButton type="button" onClick={onCancel}>
+            Cancel
+          </ShotButton>
+          <ShotButton type="button" primary onClick={begin}>
+            {photo ? (
+              <>
+                <Camera className="size-4" strokeWidth={1.8} aria-hidden />
+                Take photo
+              </>
+            ) : (
+              <>
+                <span className="size-2.5 rounded-full bg-red-500" aria-hidden />
+                Start recording
+              </>
+            )}
+          </ShotButton>
         </>
       }
-      stage={
-        <PreviewStage>
-          <CameraVideo stream={camera} onVideo={setVideo} className="pointer-events-none absolute size-px opacity-0" />
-          <PortraitFrame stream={stream} dim={live && !aligned && countdown === null}>
-            {countdown !== null && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white" aria-hidden>
-                <span className="font-serif text-[96px] leading-none font-light drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]">
-                  {countdown}
-                </span>
-                <span className="bg-stone-950/60 px-3 py-1 text-[14px]">Hold still</span>
-              </div>
-            )}
-          </PortraitFrame>
-        </PreviewStage>
+      below={
+        <QuietButton type="button" onClick={onTips}>
+          {photo ? "Remind me what a good photo is" : "Video tips"}
+        </QuietButton>
       }
+    />
+  )
+}
+
+function CloseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Stop and go back"
+      onClick={onClick}
+      className="flex size-10 items-center justify-center rounded-full bg-stone-900/78 text-white hover:bg-stone-900"
     >
-      {!unavailable && (
-        <ul className="m-0 flex list-none flex-col border-t border-stone-200 p-0">
-          <CheckRow label="Face in the oval" ok={live ? Boolean(check?.inFrame) : null} hint="Center your face" />
-          <CheckRow
-            label="Distance"
-            ok={live ? check?.distance === "ok" : null}
-            hint={check?.distance === "back" ? "Move back a little" : "Move closer"}
-          />
-          <CheckRow
-            label="Light"
-            ok={live ? Boolean(check?.light) : null}
-            hint={
-              <>
-                <Sun className="size-4" strokeWidth={2} aria-hidden />
-                Face a window
-              </>
-            }
-          />
-        </ul>
-      )}
-      <p role="status" className="m-0 text-[14px] text-stone-600">
-        {countdown !== null
-          ? `Recording starts in ${countdown}…`
-          : live
-            ? aligned
-              ? "Almost there. Find a bit more light."
-              : "Adjust until all three are checked."
-            : status === "loading"
-              ? "Starting the face check…"
-              : ""}
-      </p>
-      {(unavailable || canSkip) && (
-        <div className="flex flex-col gap-2">
-          {unavailable ? (
-            <PrimaryButton type="button" onClick={start}>
-              I&apos;m in the oval, start
-            </PrimaryButton>
-          ) : (
-            <QuietButton type="button" onClick={start}>
-              The check isn&apos;t finding me. Start anyway
-            </QuietButton>
-          )}
-        </div>
-      )}
-    </StageLayout>
+      <X className="size-[18px]" strokeWidth={2} aria-hidden />
+    </button>
+  )
+}
+
+// The three seconds between Start recording and the recording, already full
+// screen, with the first line waiting in the script box.
+export function CountdownStep({
+  stream,
+  firstLine,
+  onDone,
+  onCancel,
+}: {
+  stream: MediaStream
+  firstLine: string
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const [left, setLeft] = useState(COUNTDOWN_SECONDS)
+  const doneRef = useRef(onDone)
+  useEffect(() => {
+    doneRef.current = onDone
+  })
+  useEffect(() => {
+    let n = COUNTDOWN_SECONDS
+    const id = window.setInterval(() => {
+      n -= 1
+      if (n > 0) {
+        setLeft(n)
+        return
+      }
+      window.clearInterval(id)
+      doneRef.current()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  return (
+    <FullScreenStage
+      stream={stream}
+      dim
+      script={
+        <>
+          <p className="m-0 text-[20px] leading-[1.4] font-semibold text-white/50 sm:text-[24px]">{firstLine}</p>
+          <p className="m-0 mt-2 text-[14px] text-white/70">Speak with energy. Starting…</p>
+        </>
+      }
+      corner={<CloseButton onClick={onCancel} />}
+    >
+      <div className="absolute inset-0 flex items-center justify-center" aria-live="assertive">
+        <span className="font-serif text-[160px] leading-none font-light drop-shadow-[0_2px_16px_rgba(0,0,0,0.5)]">{left}</span>
+      </div>
+    </FullScreenStage>
   )
 }
 
@@ -396,7 +366,7 @@ function MicLevel({ level }: { level: number }) {
       {bars.map((at, i) => (
         <span
           key={i}
-          className={cn("w-1 transition-colors", level > at ? "bg-[#4d5a48]" : "bg-stone-300")}
+          className={cn("w-1 transition-colors", level > at ? "bg-[#b9d3a4]" : "bg-white/25")}
           style={{ height: `${(i + 1) * 25}%` }}
         />
       ))}
@@ -551,7 +521,7 @@ export function ScriptStep({
   // Keyboard backup for when the prompter gets ahead or behind.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Leave Space/arrows alone on other controls (Finish, Start over), or a
+      // Leave Space/arrows alone on other controls (Finish, close), or a
       // single key press would both skip a line and press the button.
       const target = event.target as HTMLElement | null
       if (target?.closest("input, textarea, select")) return
@@ -576,11 +546,10 @@ export function ScriptStep({
   }
 
   const atEnd = line === lines.length - 1
-  const visible = [line - 1, line, line + 1, line + 2].filter((i) => i >= 0 && i < lines.length)
   const lineDone = atEnd && pointer >= lineEnd(line) - 1
 
-  // The current line, word by word: read words dark, the next word
-  // underlined, the rest light.
+  // The current line, word by word: read words bright, the next word
+  // underlined, the rest faded.
   const renderCurrent = (i: number) => {
     let wordIndex = script.lineStarts[i]
     return lines[i].split(/\s+/).map((word, n) => {
@@ -594,8 +563,8 @@ export function ScriptStep({
           <span
             className={cn(
               "transition-colors duration-150",
-              read ? "text-stone-950" : "text-stone-400",
-              isNext && "text-stone-950 underline decoration-[#4d5a48] decoration-[3px] underline-offset-[8px]",
+              read ? "text-white" : "text-white/50",
+              isNext && "text-white underline decoration-[#b9d3a4] decoration-[3px] underline-offset-[7px]",
             )}
           >
             {word}
@@ -609,102 +578,56 @@ export function ScriptStep({
     mode === "pace" && !heard
       ? "We can't hear you. Check your mic is on and not muted. The script moves at a steady pace for now."
       : mode === "words"
-        ? heard
-          ? "Read out loud. Words light up as you say them."
-          : "Start reading out loud. Words light up as you say them."
-        : heard
-          ? "Read out loud. The script follows your voice."
-          : "Start reading out loud. The script follows your voice."
+        ? "Words light up as you say them."
+        : "The script follows your voice."
 
   return (
-    <main className="mx-auto flex w-full max-w-[960px] flex-grow flex-col gap-6 px-(--page-pad) py-6 sm:gap-8 sm:py-10">
-      <CaptureStepper current={1} progress={(line + 1) / lines.length} />
-      <div className="order-2 flex flex-col gap-5 sm:order-1">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-[14px] text-stone-600">
-          <span className="flex items-center gap-2">
-            <Mic className="size-4" strokeWidth={1.8} aria-hidden />
-            <MicLevel level={mic} />
-            <span className={cn(mode === "pace" && !heard && "text-[#c2410c]")}>{hint}</span>
-          </span>
-          <span className="font-mono text-[12px] tracking-[0.1em] uppercase">
-            Line {line + 1} of {lines.length}
-          </span>
-        </div>
-        <button
-          type="button"
-          data-script
-          onClick={() => goLine(line + 1)}
-          aria-label={`Script line ${line + 1} of ${lines.length}: ${lines[line]}. Tap to skip ahead.`}
-          className="flex flex-col gap-4 text-center font-serif text-[24px] leading-[1.35] tracking-[-0.01em] sm:text-[32px]"
-        >
-          {visible.map((i) => (
-            <p
-              key={i}
-              className={cn(
-                "m-0 transition-colors",
-                i < line && "text-stone-300",
-                i > line && "text-stone-400",
-                i === line && mode !== "words" && "text-stone-950",
-              )}
-            >
-              {i === line ? (
-                <span className="bg-[#eef0e9] px-1.5 py-0.5 box-decoration-clone">{renderCurrent(i)}</span>
-              ) : (
-                lines[i]
-              )}
-            </p>
-          ))}
-        </button>
-        <p className="m-0 text-center text-[13px] text-stone-500">
-          {atEnd
-            ? lineDone
-              ? "That's the end. Press Finish recording."
-              : "Last line. Press Finish recording when you're done."
-            : "Ahead or behind? Tap the script or press Space to skip a line."}
-        </p>
-      </div>
-      <div className="order-1 flex flex-wrap items-center justify-between gap-4 border-stone-200 sm:order-2 sm:mt-auto sm:gap-6 sm:border-t sm:pt-6">
-        <div className="relative aspect-[9/16] h-[min(220px,32vh)] overflow-hidden rounded-xl bg-stone-700">
-          <CameraVideo stream={stream} className="size-full object-cover" />
-          <span className="absolute top-2 left-2 flex h-6 items-center gap-2 bg-stone-950/72 px-2 font-mono text-[12px] text-white">
-            <span className="size-2 animate-pulse rounded-full bg-red-500" />
-            {clock(elapsed)} / {clock(TARGET_SECONDS)}
-          </span>
-        </div>
-        <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-6">
-          <QuietButton type="button" onClick={onRestart}>
-            Start over
-          </QuietButton>
+    <FullScreenStage
+      stream={stream}
+      script={
+        <>
           <button
             type="button"
-            onClick={finish}
-            className={cn(
-              "flex h-[52px] items-center gap-3 border px-5 text-[16px] font-medium transition-colors",
-              atEnd ? "border-stone-950 bg-stone-950 text-white hover:bg-stone-800" : "border-stone-950/16 hover:border-stone-950",
-            )}
+            data-script
+            onClick={() => goLine(line + 1)}
+            aria-label={`Script line ${line + 1} of ${lines.length}: ${lines[line]}. Tap to skip ahead.`}
+            className="flex w-full flex-col items-center gap-2 text-white"
           >
-            <Square className="size-4 fill-red-500 text-red-500" aria-hidden />
-            Finish recording
+            <span className={cn("text-[20px] leading-[1.4] font-semibold sm:text-[24px]", mode !== "words" && "text-white")}>
+              {renderCurrent(line)}
+            </span>
+            {line + 1 < lines.length && (
+              <span className="text-[17px] leading-[1.4] font-medium text-white/50 sm:text-[20px]">{lines[line + 1]}</span>
+            )}
           </button>
-        </div>
-      </div>
-    </main>
-  )
-}
-
-// A Check as a chip: passed, failed, or never checked (shown neutrally).
-function Chip({ ok, children }: { ok: Check; children: ReactNode }) {
-  return (
-    <li
-      className={cn(
-        "flex h-8 items-center gap-2 px-3 text-[14px]",
-        ok === true ? "bg-[#eef0e9] text-[#3a4536]" : ok === false ? "bg-orange-50 text-[#c2410c]" : "bg-stone-100 text-stone-600",
-      )}
-    >
-      {ok === true && <DoneMark className="size-3.5 stroke-[#3a4536]" />}
-      {ok === false && <TriangleAlert className="size-3.5" aria-hidden />}
-      {children}
-    </li>
+          <span className="mt-2 flex items-center justify-center gap-2 text-[13px] text-white/65">
+            <MicLevel level={mic} />
+            <span className={cn(mode === "pace" && !heard && "text-orange-300")}>
+              {atEnd ? (lineDone ? "That's the end. Press Finish recording." : "Last line. Press Finish recording when you're done.") : hint}
+            </span>
+          </span>
+        </>
+      }
+      corner={
+        <>
+          <span className="flex h-8 items-center gap-2 rounded-full bg-stone-900/78 px-3 font-mono text-[13px]">
+            <span className="size-2 animate-pulse rounded-full bg-red-500" aria-hidden />
+            {clock(elapsed)}
+          </span>
+          <CloseButton onClick={onRestart} />
+        </>
+      }
+      bottom={
+        <button
+          type="button"
+          onClick={finish}
+          className="flex h-10 items-center gap-2 rounded-full bg-white px-[18px] text-[14px] font-medium text-stone-950 hover:bg-stone-100"
+        >
+          <Square className="size-2.5 fill-red-500 text-red-500" aria-hidden />
+          Finish recording
+        </button>
+      }
+    />
   )
 }
 
@@ -725,27 +648,26 @@ const STALL_MS = 5000
 // and local; the persisted per-take verdict is `checks.playable`.
 type PlaybackProblem = "refused" | "stalled" | null
 
+// The take just recorded, in the same frame as the camera was: play it, then
+// use it or record again. Nothing is uploaded until Make my sample.
 export function ReviewStep({
   recording,
-  consent,
   error,
   notice,
-  onConsent,
   onPlayable,
-  onSubmit,
+  onUse,
   onRedo,
 }: {
   recording: Recording
-  consent: boolean
   error?: string | null
   notice?: ReviewNotice | null
-  onConsent: (value: boolean) => void
   /**
    * Whether this browser could play the take back (true once playback really
    * runs, false on a load or decode error); the flow keeps it with the checks.
    */
   onPlayable: (playable: boolean) => void
-  onSubmit: () => void
+  /** Keep this take and go on to the topic (nothing is uploaded yet). */
+  onUse: () => void
   onRedo: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
@@ -758,10 +680,22 @@ export function ReviewStep({
   // The flow records the player's "no" in the take's checks (and keeps it),
   // so the take itself says whether it played.
   const unplayable = checks.playable === false
-  const short = recording.seconds < 45
-  // A check that never ran isn't a complaint; a recovered take's placeholders
-  // aren't readings.
-  const allGood = !unplayable && (checks.recovered || (checks.faceSeen !== false && checks.voiceHeard !== false && !short))
+  // The script reads in about TARGET_SECONDS; well under that, it wasn't read through.
+  const short = recording.seconds < TARGET_SECONDS * 0.6
+  // What the pill says: the first thing worth another take, or that it's
+  // fine. A check that never ran isn't a complaint; a recovered take's
+  // placeholders aren't readings, so it gets no pill.
+  const pill: { text: string; ok: boolean } | null = checks.recovered
+    ? null
+    : checks.faceSeen === false
+      ? { text: "Face not seen", ok: false }
+      : checks.voiceHeard === false
+        ? { text: "No voice heard", ok: false }
+        : short
+          ? { text: "Short. Read the whole script", ok: false }
+          : checks.faceSeen && checks.voiceHeard
+            ? { text: "Face and voice clear", ok: true }
+            : null
   // What to say over the player: the file's verdict beats a per-press
   // symptom; a stall beats a refusal (it means the press was accepted); a
   // refusal is shown only while the custom button is up.
@@ -798,107 +732,113 @@ export function ReviewStep({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1280px] flex-grow flex-wrap items-center justify-center gap-8 px-(--page-pad) py-6 sm:gap-12 sm:py-12">
-      <div className="relative aspect-[9/16] h-[min(640px,70vh)] shrink-0 overflow-hidden rounded-[28px] bg-stone-700">
-        <video
-          key={recording.url}
-          ref={player}
-          src={recording.url}
-          playsInline
-          controls={playing}
-          onPlay={() => {
-            setPlaying(true)
-            // If nothing plays within a few seconds, say so (see PlaybackProblem).
-            clearStall()
-            stallTimer.current = window.setTimeout(stalled, STALL_MS)
-          }}
-          // `playing`, not `play`: `play` fires on the press; `playing` only
-          // once the browser has decoded enough to advance.
-          onPlaying={startedPlaying}
-          // A pause before playback got going isn't a stall.
-          onPause={clearStall}
-          onError={(event) => {
-            console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
-            clearStall()
-            onPlayable(false)
-          }}
-          className={cn("size-full object-cover", !playing && "-scale-x-100")}
-        />
-        {overlay && (
-          <p className="absolute inset-x-4 bottom-12 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
-            {overlay === "unplayable"
-              ? notice?.partial
-                ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
-                : "This recording looks damaged and may not play for us either. We recommend recording again."
-              : overlay === "stalled"
-                ? "This recording isn't playing. You can still submit it; recording again is safer."
-                : "Playback didn't start. Try again."}
-          </p>
-        )}
-        {!playing && (
-          <button
-            type="button"
-            aria-label="Play recording"
-            onClick={play}
-            className="absolute top-1/2 left-1/2 flex size-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/92"
-          >
-            <Play className="size-7 translate-x-0.5 fill-stone-950 text-stone-950" aria-hidden />
-          </button>
-        )}
-        {!playing && recording.seconds > 0 && (
-          <span className="absolute right-4 bottom-4 flex h-6 items-center bg-stone-950/72 px-2 font-mono text-[12px] text-white">
-            {clock(recording.seconds)}
-          </span>
-        )}
-      </div>
-      <div className="flex flex-[1_1_320px] flex-col gap-6">
-        <FlowTitle>{allGood && !notice ? "Looks good" : "Take a look"}</FlowTitle>
-        {notice && (
-          <p className="m-0 flex items-start gap-2 bg-stone-50 p-3 text-[14px] leading-[1.5] text-stone-700">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-[#c2410c]" aria-hidden />
-            {notice.text}
-          </p>
-        )}
-        {/* A recovered take's two readings are placeholders, not results. */}
-        {!checks.recovered && (
-          <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-            <Chip ok={checks.faceSeen}>
-              {checks.faceSeen === true ? "Face clear" : checks.faceSeen === false ? "Face not seen" : "Face not checked"}
-            </Chip>
-            <Chip ok={checks.voiceHeard}>
-              {checks.voiceHeard === true ? "Voice clear" : checks.voiceHeard === false ? "No voice heard" : "Voice not checked"}
-            </Chip>
-            {short && <Chip ok={false}>Short. Aim for a minute</Chip>}
-          </ul>
-        )}
-        <label
-          className={cn(
-            "flex cursor-pointer items-start gap-3 border p-4 text-[14px] leading-[1.5]",
-            consent ? "border-stone-950" : "border-stone-200",
-          )}
-        >
-          <input
-            type="checkbox"
-            checked={consent}
-            onChange={(e) => onConsent(e.target.checked)}
-            className="m-0 size-5 shrink-0 accent-stone-950"
+    <ShotLayout
+      frame={
+        <ShotFrame>
+          <video
+            key={recording.url}
+            ref={player}
+            src={recording.url}
+            playsInline
+            controls={playing}
+            onPlay={() => {
+              setPlaying(true)
+              // If nothing plays within a few seconds, say so (see PlaybackProblem).
+              clearStall()
+              stallTimer.current = window.setTimeout(stalled, STALL_MS)
+            }}
+            // `playing`, not `play`: `play` fires on the press; `playing` only
+            // once the browser has decoded enough to advance.
+            onPlaying={startedPlaying}
+            // A pause before playback got going isn't a stall.
+            onPause={clearStall}
+            onError={(event) => {
+              console.error("The review player can't play this recording", event.currentTarget.error, recording.mime)
+              clearStall()
+              onPlayable(false)
+            }}
+            className={cn("size-full object-cover", !playing && "-scale-x-100")}
           />
-          <span>{CONSENT_TEXT}</span>
-        </label>
-        {error && (
+          {notice && (
+            <p className="absolute inset-x-3 top-3 m-0 flex items-start gap-2 bg-stone-950/72 p-2.5 text-[13px] leading-[1.45] text-white">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-orange-300" aria-hidden />
+              {notice.text}
+            </p>
+          )}
+          {overlay && (
+            <p className="absolute inset-x-4 bottom-16 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
+              {overlay === "unplayable"
+                ? notice?.partial
+                  ? "This recording can't be played back, probably because it was cut off. You can still use it, but we may not be able to; recording again is safer."
+                  : "This recording looks damaged and may not play for us either. We recommend recording again."
+                : overlay === "stalled"
+                  ? "This recording isn't playing. You can still use it; recording again is safer."
+                  : "Playback didn't start. Try again."}
+            </p>
+          )}
+          {!playing && (
+            <button
+              type="button"
+              aria-label="Play recording"
+              onClick={play}
+              className="absolute top-1/2 left-1/2 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/92"
+            >
+              <Play className="size-6 translate-x-0.5 fill-stone-950 text-stone-950" aria-hidden />
+            </button>
+          )}
+          {!playing && !notice && recording.seconds > 0 && (
+            <span className="absolute top-3.5 right-3.5 flex h-[26px] items-center rounded-full bg-stone-950/60 px-2.5 font-mono text-[12px] text-white">
+              {clock(recording.seconds)}
+            </span>
+          )}
+          {!playing && pill && <StatusPill tone={pill.ok ? "ok" : "warn"}>{pill.text}</StatusPill>}
+        </ShotFrame>
+      }
+      buttons={
+        <>
+          <ShotButton type="button" onClick={onRedo}>
+            Record again
+          </ShotButton>
+          <ShotButton type="button" primary onClick={onUse}>
+            Use this video
+          </ShotButton>
+        </>
+      }
+      below={
+        error && (
           <p role="alert" className="m-0 text-[14px] leading-[1.5] text-[#c2410c]">
             {error}
           </p>
-        )}
-        <div className="flex flex-col gap-2">
-          <PrimaryButton type="button" disabled={!consent} onClick={onSubmit}>
-            Submit recording
-          </PrimaryButton>
-          <QuietButton type="button" onClick={onRedo}>
-            Record again
-          </QuietButton>
-        </div>
-      </div>
-    </main>
+        )
+      }
+    />
+  )
+}
+
+// The portrait photo just taken, in the frame it was framed in: keep it, or
+// take it again. Shown mirrored, like the preview (the file itself isn't).
+export function PhotoReviewStep({ photo, onUse, onRetake }: { photo: Photo; onUse: () => void; onRetake: () => void }) {
+  return (
+    <ShotLayout
+      frame={
+        <ShotFrame>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing for next/image to optimise */}
+          <img src={photo.url} alt="Your portrait photo" className="size-full -scale-x-100 object-cover" />
+          {photo.faceSeen !== null && (
+            <StatusPill tone={photo.faceSeen ? "ok" : "warn"}>{photo.faceSeen ? "Face clear" : "Face not seen"}</StatusPill>
+          )}
+        </ShotFrame>
+      }
+      buttons={
+        <>
+          <ShotButton type="button" onClick={onRetake}>
+            Retake
+          </ShotButton>
+          <ShotButton type="button" primary onClick={onUse}>
+            Use this photo
+          </ShotButton>
+        </>
+      }
+    />
   )
 }

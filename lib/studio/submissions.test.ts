@@ -29,9 +29,10 @@ describe("downloadName", () => {
   it("names the file after the person and the submission, with the recording's extension", () => {
     expect(downloadName({ name: "Dan Jeong" }, SID, `studio/${SID}/recording.mp4`)).toBe(`dan-jeong-${SID}.mp4`)
   })
-  it("falls back to the email, then to 'recording', and strips anything odd", () => {
+  it("falls back to the email, then to the file's own name, and strips anything odd", () => {
     expect(downloadName({ email: "a.b@firm.ca" }, SID, "x/recording.webm")).toBe(`a-b-firm-ca-${SID}.webm`)
     expect(downloadName({}, SID, "x/recording.mp4")).toBe(`recording-${SID}.mp4`)
+    expect(downloadName({}, SID, "x/photo.jpg")).toBe(`photo-${SID}.jpg`)
     expect(downloadName({ name: "  " }, SID, "x/recording")).toBe(`recording-${SID}.mp4`)
   })
   it("falls through when a name has no Latin letters at all", () => {
@@ -119,6 +120,24 @@ describe("loadSubmission", () => {
     expect(s?.recording?.bytes).toBeUndefined()
   })
 
+  it("links the portrait photo when the folder has one, and lists it without a link when its metadata can't be read", async () => {
+    const photo = `studio/${SID}/photo.jpg`
+    const bucket = fakeBucket({
+      listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`, photo] } },
+      meta: { [`studio/${SID}/recording.mp4`]: META, [photo]: { name: photo, downloadTokens: "ptok" } },
+    })
+    const s = await loadSubmission(bucket, SID)
+    expect(s?.photo?.url?.endsWith(`/o/studio%2F${SID}%2Fphoto.jpg?alt=media&token=ptok`)).toBe(true)
+    expect(s?.problems).toEqual([])
+
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const broken = fakeBucket({
+      listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`, photo] } },
+      meta: { [`studio/${SID}/recording.mp4`]: META, [photo]: 500 },
+    })
+    expect((await loadSubmission(broken, SID))?.photo).toEqual({ name: photo })
+  })
+
   it("is null for a folder with nothing in it", async () => {
     const bucket = fakeBucket({ listings: {} })
     expect(await loadSubmission(bucket, "20261009T211755-00000000")).toBeNull()
@@ -184,6 +203,12 @@ describe("loadSubmission", () => {
   it("lets a refused read (the service account's credentials or IAM) reach the route instead of hiding it per file", async () => {
     const refused = fakeBucket({ listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`] } }, meta: { [`studio/${SID}/recording.mp4`]: 403 } })
     await expect(loadSubmission(refused, SID)).rejects.toBeInstanceOf(StorageError)
+    const photo = `studio/${SID}/photo.jpg`
+    const refusedPhoto = fakeBucket({
+      listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`, photo] } },
+      meta: { [`studio/${SID}/recording.mp4`]: META, [photo]: 403 },
+    })
+    await expect(loadSubmission(refusedPhoto, SID)).rejects.toBeInstanceOf(StorageError)
     const bucket = fakeBucket({ listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`] } }, meta: { [`studio/${SID}/recording.mp4`]: 401 } })
     await expect(loadSubmission(bucket, SID)).rejects.toMatchObject({ status: 401 })
   })

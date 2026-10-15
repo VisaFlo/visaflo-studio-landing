@@ -20,3 +20,11 @@ export type RecordingExtension = (typeof RECORDING_EXTENSIONS)[number]
 // characters. docs/studio-capture/storage.rules repeats this pattern; change
 // both.
 export const SUBMISSION_ID = /^\d{8}T\d{6}-[0-9a-f]{8}$/
+
+// The portrait photo's name in a submission's folder.
+// docs/studio-capture/storage.rules repeats it; change both.
+export const PHOTO_FILE = "photo.jpg"
+
+/** The files of a submission an admin can download (/api/admin/recording?file=). */
+export const SUBMISSION_FILES = ["recording", "photo"] as const
+export type SubmissionFile = (typeof SUBMISSION_FILES)[number]

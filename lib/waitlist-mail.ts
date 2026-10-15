@@ -20,7 +20,7 @@ export function recordLink(origin: string, attribution?: Attribution): string {
 
 // The closing pitch in the chart and playbook emails.
 export function recordPitch(link: string) {
-  const lead = "VisaFlo Studio makes immigration videos in your own face and voice, from IRCC's own announcements. Record your face and voice (about 3 minutes) and pick a topic, and we'll make a sample video and email it to you."
+  const lead = "VisaFlo Studio makes immigration videos in your own face and voice, from IRCC's own announcements. Record your face and voice (about 2 minutes) and pick a topic, and we'll make a sample video and email it to you."
   return {
     text: `${lead}\n${link}`,
     html: `<p style="margin:24px 0 16px">${escapeHtml(lead)}</p>
@@ -78,9 +78,9 @@ async function sendRecordInvite(entry: WaitlistEntry, link: string): Promise<voi
   const greeting = firstName ? `Hi ${firstName},` : "Hi,"
   const steps = [
     "Thanks for asking for a sample video. To make it in your own face and voice, we need a short recording of you.",
-    "It takes about 3 minutes: fit your face in a circle, slowly turn your head, then read a short script out loud. Then pick a topic, and we'll make your sample and email it to you.",
+    "It takes about 2 minutes: take a vertical photo of yourself, then a short video reading a script out loud. Then pick a topic, and we'll make your sample and email it to you.",
   ]
-  const account = `Sign in with your VisaFlo email and password, or choose Create an account and use ${entry.email}.`
+  const account = `No account needed. Enter ${entry.email} on the page so your sample comes back to this inbox.`
   const tips = [
     "A computer with a webcam or your phone both work",
     "If the camera doesn't start, open the link in Chrome or Safari",
