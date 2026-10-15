@@ -7,10 +7,11 @@ import { StorageError } from "@/lib/studio/storage"
 
 const RECORDING_FILE = new RegExp(`^recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
 
-// Someone finished recording on /start and picked a topic. Nobody signs in
-// there: the recording is already in studio/{submissionId}/ (the storage
-// rules let a browser create only that), and this checks it is there, keeps
-// what they sent as request.json next to it and tells the team. request.json
+// Someone took their portrait photo, recorded on /start and picked a topic.
+// Nobody signs in there: the photo and the recording are already in
+// studio/{submissionId}/ (the storage rules let a browser create only
+// those), and this checks they are there, keeps what was sent as
+// request.json next to them and tells the team. request.json
 // is created only once, so the same submission is never mailed twice.
 export async function POST(request: Request) {
   let parsed: unknown
@@ -35,6 +36,14 @@ export async function POST(request: Request) {
     console.error("Rejected a studio request's recording path", { submissionId: body.submissionId, recordingPath: body.recordingPath })
     return Response.json({ error: "That isn't a recording we know." }, { status: 400 })
   }
+  // A page from before the portrait photo sends none; one that does names
+  // this submission's photo.jpg and nothing else.
+  const sentPhoto = body.photoPath === undefined ? undefined : (identifier(body.photoPath, LIMITS.recordingPath) ?? "")
+  if (sentPhoto !== undefined && sentPhoto !== `${folder}photo.jpg`) {
+    console.error("Rejected a studio request's photo path", { submissionId, photoPath: body.photoPath })
+    return Response.json({ error: "That isn't a photo we know." }, { status: 400 })
+  }
+
   // The client sends these only once they are set, so a refusal here is a
   // client bug worth a line too.
   const email = asEmail(body.email)
@@ -71,15 +80,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "We saved your recording but couldn't send the request. Try again." }, { status: 500 })
   }
 
-  try {
-    await bucket.meta(recordingPath)
-  } catch (error) {
-    if (!(error instanceof StorageError && error.status === 404)) {
-      console.error(`Could not check the recording of studio request ${submissionId}`, error)
-      return Response.json({ error: "We couldn't send the request. Try again." }, { status: 500 })
+  for (const [path, what] of [[recordingPath, "recording"], ...(sentPhoto ? [[sentPhoto, "photo"]] : [])]) {
+    try {
+      await bucket.meta(path)
+    } catch (error) {
+      if (!(error instanceof StorageError && error.status === 404)) {
+        console.error(`Could not check the ${what} of studio request ${submissionId}`, error)
+        return Response.json({ error: "We couldn't send the request. Try again." }, { status: 500 })
+      }
+      console.error(`Rejected studio request ${submissionId}: no ${what} at ${path}`)
+      return Response.json({ error: `We couldn't find your ${what}. Take it again, then send.` }, { status: 404 })
     }
-    console.error(`Rejected studio request ${submissionId}: no recording at ${recordingPath}`)
-    return Response.json({ error: "We couldn't find your recording. Record it again, then send." }, { status: 404 })
   }
 
   // Already sent (a double click, or a retry after the answer got lost): it
@@ -103,6 +114,7 @@ export async function POST(request: Request) {
     recordingSeconds,
     recordingSource: "camera",
     checks,
+    photoPath: sentPhoto,
     email,
     firstName,
     lastName,
@@ -134,6 +146,7 @@ export async function POST(request: Request) {
       recordingSeconds,
       recordingSource: "camera",
       checks,
+      photoPath: sentPhoto,
       consentAt,
       adminUrl: new URL(`/admin/${submissionId}`, request.url).toString(),
     })

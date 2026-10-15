@@ -8,7 +8,12 @@ email, first and last name and firm name, which stay in that browser
 
 ## How it fits together
 
-- **Recording**: one vertical MediaRecorder clip of the script being read
+- **Portrait photo**: first, one still of the same vertical frame
+  (`lib/studio/photo.ts`), taken after the same framing checks and countdown
+  as the video, reviewed, then kept in IndexedDB with the take until sent.
+  Uploaded as `photo.jpg` (JPEG) next to the recording.
+- **Recording**: one vertical MediaRecorder clip of the short script (about
+  30 seconds, `lib/studio/content.ts`) being read
   (MP4 on Safari and new Chrome, WebM elsewhere). A phone held upright
   records as is, in the phone's own portrait aspect; a laptop webcam's 16:9
   frame is cropped to its middle 9:16 column in the browser
@@ -16,10 +21,10 @@ email, first and last name and firm name, which stay in that browser
   runs the framing checks (face in the oval, distance, light) and starts the
   recording on a countdown; there is no head-turn step. If it can't load, the
   flow continues without live checks.
-- **Files**: the browser uploads `recording.{mp4,webm}` straight to
+- **Files**: the browser uploads `photo.jpg` and `recording.{mp4,webm}` straight to
   `gs://devdashboard-c9159-ca/studio/{submissionId}/` (the id is the UTC time
   plus 8 hex characters, `SUBMISSION_ID` in `lib/studio/project.ts`). The
-  storage rules let a signed-out browser create that one file and nothing
+  storage rules let a signed-out browser create those two files and nothing
   else: no overwrite, no `request.json`, no reading, listing or deleting.
 - **Notification**: `POST /api/studio/requests` checks the recording is in
   the bucket, writes `request.json` next to it with the service account
@@ -32,9 +37,10 @@ email, first and last name and firm name, which stay in that browser
 
 - **Admin**: `/admin` lists every submission (when, who, topic, length,
   check flags), including people who recorded but never picked a topic,
-  with a **Download recording** button on each row that has a recording.
+  with **Download video** and **Download photo** buttons on each row that
+  has them (`/api/admin/recording?id=…`, `&file=photo` for the photo).
   A row opens its own page (`/admin/{submissionId}`) with the
-  recording playable, the consent text, the same download, and **Delete
+  recording playable, the consent text, the same downloads, and **Delete
   submission** (after a confirm, `DELETE /api/admin/submissions` removes
   every file in the folder for good and names any it couldn't). The file is
   saved as `{name-or-email}-{submissionId}.{ext}`

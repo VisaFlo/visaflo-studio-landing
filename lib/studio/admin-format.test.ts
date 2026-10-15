@@ -38,7 +38,7 @@ describe("describeProblems", () => {
     expect(describeProblems([{ kind: "no-recording" }, { kind: "request-unreadable", detail: "Storage responded 500: x" }])).toBe(
       "No recording file in this folder; request.json couldn't be read (Storage responded 500: x)",
     )
-    expect(describeProblems([{ kind: "no-token" }])).toBe("The recording has no download token, so it can't play here; use Download recording")
+    expect(describeProblems([{ kind: "no-token" }])).toBe("The recording has no download token, so it can't play here; use Download video")
     expect(describeProblems([])).toBe("")
   })
 })

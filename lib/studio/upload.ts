@@ -1,15 +1,17 @@
 "use client"
 
-import { ref, uploadBytesResumable, type UploadTask } from "firebase/storage"
+import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebase/storage"
 
 import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
+import { PHOTO_MIME } from "@/lib/studio/photo"
 import { extensionFor, type Recording } from "@/lib/studio/recorder"
 
 // Everything for one sample lives under studio/{submissionId}/ in the
 // VisaFlo bucket. Nobody signs in on /start: the storage rules let a browser
-// create the recording there and nothing else (no overwrite, no reading);
-// the server writes request.json next to it (app/api/studio/requests).
+// create the portrait photo and the recording there and nothing else (no
+// overwrite, no reading); the server writes request.json next to them
+// (app/api/studio/requests).
 export function submissionFolder(submissionId: string): string {
   return `studio/${submissionId}`
 }
@@ -21,10 +23,24 @@ export function newSubmissionId(): string {
   return `${stamp}-${crypto.randomUUID().slice(0, 8)}`
 }
 
+export function photoPath(submissionId: string): string {
+  return `${submissionFolder(submissionId)}/photo.jpg`
+}
+
+// The photo is small, so one request; the rules refuse a second upload to
+// the same submission, so the flow sends it once per submission.
+export async function uploadPhoto(email: string, submissionId: string, photo: Blob): Promise<void> {
+  await uploadBytes(ref(studioStorage(), photoPath(submissionId)), photo, { contentType: PHOTO_MIME, customMetadata: { email } })
+}
+
 export type UploadHandle = {
   path: string
   done: Promise<void>
   cancel: () => void
+}
+
+export function recordingPath(submissionId: string, recording: Pick<Recording, "mime">): string {
+  return `${submissionFolder(submissionId)}/recording.${extensionFor(recording.mime)}`
 }
 
 export function uploadRecording(
@@ -33,7 +49,7 @@ export function uploadRecording(
   recording: Recording,
   onProgress: (fraction: number) => void,
 ): UploadHandle {
-  const path = `${submissionFolder(submissionId)}/recording.${extensionFor(recording.mime)}`
+  const path = recordingPath(submissionId, recording)
   const task: UploadTask = uploadBytesResumable(ref(studioStorage(), path), recording.blob, {
     contentType: recording.mime.split(";")[0],
     customMetadata: {
@@ -59,6 +75,7 @@ export type SampleRequest = {
   recordingSeconds: number
   recordingSource: Recording["source"]
   checks: Recording["checks"]
+  photoPath: string
   email: string
   firstName: string
   lastName: string

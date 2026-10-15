@@ -91,29 +91,35 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
         </div>
       </header>
 
-      <section className="grid grid-cols-1 gap-6 border border-stone-200 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
-        {playable ? (
-          <video
-            key={s.recording?.url}
-            src={s.recording?.url}
-            controls
-            playsInline
-            preload="metadata"
-            className="max-h-[480px] max-w-full bg-stone-950"
-            onError={(event) => {
-              console.error(`The recording for ${s.id} wouldn't play`, event.currentTarget.error, s.recording?.url)
-              setFailedUrl(s.recording?.url ?? null)
-            }}
-          />
-        ) : (
-          <div className="flex aspect-video items-center justify-center bg-stone-100 p-4 text-center text-[14px] text-stone-600">
-            {playerError
-              ? "The recording couldn't be played here. Download it, or open the folder in Firebase."
-              : s.recording
-                ? "No playable link for this recording. Download it, or open the folder in Firebase."
-                : "No recording in this folder."}
-          </div>
-        )}
+      <section className="grid grid-cols-1 gap-6 border border-stone-200 p-5 lg:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-wrap items-start gap-3">
+          {s.photo?.url && (
+            // eslint-disable-next-line @next/next/no-img-element -- a download-token link from the bucket, not a site image
+            <img src={s.photo.url} alt="Portrait photo" className="h-[400px] max-w-full bg-stone-950 object-contain" />
+          )}
+          {playable ? (
+            <video
+              key={s.recording?.url}
+              src={s.recording?.url}
+              controls
+              playsInline
+              preload="metadata"
+              className="h-[400px] max-w-full bg-stone-950"
+              onError={(event) => {
+                console.error(`The recording for ${s.id} wouldn't play`, event.currentTarget.error, s.recording?.url)
+                setFailedUrl(s.recording?.url ?? null)
+              }}
+            />
+          ) : (
+            <div className="flex aspect-video items-center justify-center bg-stone-100 p-4 text-center text-[14px] text-stone-600">
+              {playerError
+                ? "The recording couldn't be played here. Download it, or open the folder in Firebase."
+                : s.recording
+                  ? "No playable link for this recording. Download it, or open the folder in Firebase."
+                  : "No recording in this folder."}
+            </div>
+          )}
+        </div>
         <div className="flex flex-col gap-4">
           <dl className="m-0 grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[14px]">
             {rows.map(([label, value]) => (
@@ -125,15 +131,21 @@ function SubmissionBody({ user, id }: { user: User; id: string }) {
           </dl>
           {s.consent && <p className="m-0 border-l-2 border-stone-200 pl-3 text-[13px] text-stone-600">“{s.consent}”</p>}
           {s.problems.length > 0 && <ErrorText>{describeProblems(s.problems)}</ErrorText>}
-          {s.recording && (
-            <div>
-              <DownloadRecording user={user} id={s.id} />
+          {(s.recording || s.photo) && (
+            <div className="flex flex-wrap items-start gap-3">
+              {s.recording && <DownloadRecording user={user} id={s.id} />}
+              {s.photo && <DownloadRecording user={user} id={s.id} file="photo" kind={s.recording ? "secondary" : "primary"} />}
             </div>
           )}
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-[14px]">
             {s.recording?.url && (
               <a href={s.recording.url} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
                 Open recording
+              </a>
+            )}
+            {s.photo?.url && (
+              <a href={s.photo.url} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">
+                Open photo
               </a>
             )}
             <a href={s.consoleUrl} target="_blank" rel="noreferrer" className="underline underline-offset-[3px]">

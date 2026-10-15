@@ -15,9 +15,11 @@ const mail = vi.mocked(sendStudioRequestEmail)
 const SID = "20261009T211755-393dbaa7"
 const RECORDING = `studio/${SID}/recording.mp4`
 const REQUEST_JSON = `studio/${SID}/request.json`
+const PHOTO = `studio/${SID}/photo.jpg`
 const BODY = {
   submissionId: SID,
   recordingPath: RECORDING,
+  photoPath: PHOTO,
   recordingSeconds: 61.4,
   email: "dan@firm.ca",
   firstName: "Dan",
@@ -34,7 +36,7 @@ const post = (body: unknown) => postRaw(JSON.stringify(body))
 
 let bucket: ReturnType<typeof fakeBucket>
 function useBucket(setup: Partial<Bucket> = {}) {
-  bucket = fakeBucket({ listings: {}, meta: { [RECORDING]: { name: RECORDING } }, ...setup })
+  bucket = fakeBucket({ listings: {}, meta: { [RECORDING]: { name: RECORDING }, [PHOTO]: { name: PHOTO } }, ...setup })
   admin.mockReturnValue({ bucket, isMaster: vi.fn() })
 }
 const saved = () => JSON.parse(bucket.create.mock.calls[0][1]) as Record<string, unknown>
@@ -55,6 +57,7 @@ describe("POST /api/studio/requests", () => {
     expect(bucket.create).toHaveBeenCalledWith(REQUEST_JSON, expect.any(String), "application/json")
     expect(saved()).toMatchObject({
       submissionId: SID,
+      photoPath: PHOTO,
       email: "dan@firm.ca",
       firstName: "Dan",
       lastName: "Jeong",
@@ -72,6 +75,7 @@ describe("POST /api/studio/requests", () => {
         recordingSeconds: 61,
         recordingSource: "camera",
         checks: { faceSeen: true, voiceHeard: null },
+        photoPath: PHOTO,
         adminUrl: `https://studio.visaflo.ca/admin/${SID}`,
       }),
     )
@@ -86,8 +90,32 @@ describe("POST /api/studio/requests", () => {
     expect(bucket.create).not.toHaveBeenCalled()
   })
 
+  it("only accepts this submission's photo.jpg as the photo", async () => {
+    expect((await post({ ...BODY, photoPath: "studio/20261009T211755-aaaaaaaa/photo.jpg" })).status).toBe(400)
+    expect((await post({ ...BODY, photoPath: `studio/${SID}/photo.png` })).status).toBe(400)
+    expect((await post({ ...BODY, photoPath: 42 })).status).toBe(400)
+    expect(mail).not.toHaveBeenCalled()
+  })
+
+  it("refuses a request whose photo isn't in the bucket", async () => {
+    useBucket({ meta: { [RECORDING]: { name: RECORDING } } })
+    const response = await post(BODY)
+    expect(response.status).toBe(404)
+    expect(((await response.json()) as { error: string }).error).toContain("photo")
+    expect(mail).not.toHaveBeenCalled()
+  })
+
+  it("still takes a request without a photo from a page that had no photo step", async () => {
+    const { photoPath: _unused, ...withoutPhoto } = BODY
+    void _unused
+    useBucket({ meta: { [RECORDING]: { name: RECORDING } } })
+    expect((await post(withoutPhoto)).status).toBe(200)
+    expect(saved().photoPath).toBeUndefined()
+    expect(mail.mock.calls[0][0].photoPath).toBeUndefined()
+  })
+
   it("refuses a request whose recording isn't in the bucket", async () => {
-    useBucket({ meta: {} })
+    useBucket({ meta: { [PHOTO]: { name: PHOTO } } })
     const response = await post(BODY)
     expect(response.status).toBe(404)
     expect(bucket.create).not.toHaveBeenCalled()
@@ -113,7 +141,7 @@ describe("POST /api/studio/requests", () => {
   })
 
   it("answers a submission that was already sent as done, without mailing it again", async () => {
-    useBucket({ meta: { [RECORDING]: { name: RECORDING }, [REQUEST_JSON]: { name: REQUEST_JSON } } })
+    useBucket({ meta: { [RECORDING]: { name: RECORDING }, [PHOTO]: { name: PHOTO }, [REQUEST_JSON]: { name: REQUEST_JSON } } })
     expect((await post(BODY)).status).toBe(200)
     expect(bucket.create).not.toHaveBeenCalled()
     // Two sends at once: the check passed for both, and Storage refused the second create.
@@ -131,7 +159,7 @@ describe("POST /api/studio/requests", () => {
   })
 
   it("fails without mailing when the bucket can't be reached or written", async () => {
-    useBucket({ meta: { [RECORDING]: 503 } })
+    useBucket({ meta: { [RECORDING]: 503, [PHOTO]: { name: PHOTO } } })
     expect((await post(BODY)).status).toBe(500)
     useBucket({ creates: { [REQUEST_JSON]: 403 } })
     expect((await post(BODY)).status).toBe(500)

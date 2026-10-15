@@ -36,6 +36,8 @@ export type Submission = {
    * object metadata when readable.
    */
   recording?: { name: string; url?: string; contentType?: string; bytes?: number }
+  /** The portrait photo (photo.jpg), when the folder has one; `url` opens it, like the recording's. */
+  photo?: { name: string; url?: string }
   consoleUrl: string
   /** Parts of the folder that are missing or couldn't be read; empty when all is well. */
   problems: SubmissionProblem[]

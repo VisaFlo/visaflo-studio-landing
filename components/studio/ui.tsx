@@ -103,6 +103,80 @@ export function FlowHeader({ title, step, onBack }: { title: string; step?: stri
   )
 }
 
+export type HeaderStep = {
+  label: string
+  state: "done" | "current" | "todo"
+  /** Set when the step can be opened again to change it. */
+  onOpen?: () => void
+}
+
+// /start's header: back, the logo, the five steps (any step already reached
+// can be opened again), and where you are. Labels give way on narrow screens,
+// the current one last.
+export function StepsHeader({ steps, counter, onBack }: { steps: HeaderStep[]; counter: string; onBack?: () => void }) {
+  return (
+    <header className="grid h-[72px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-stone-950/8 px-3 sm:px-(--page-pad)">
+      <div className="flex min-w-0 items-center gap-2">
+        {onBack && (
+          <button
+            type="button"
+            aria-label="Back"
+            onClick={onBack}
+            className="flex size-11 shrink-0 items-center justify-center hover:bg-stone-50 sm:-ml-3"
+          >
+            <ChevronLeft className="size-5" strokeWidth={1.8} />
+          </button>
+        )}
+        <Link href="/" aria-label="VisaFlo Studio home" className="hidden sm:flex">
+          <Logo />
+        </Link>
+      </div>
+      <nav aria-label="Your sample video">
+        <ol className="m-0 flex list-none items-center gap-2 p-0 sm:gap-2.5">
+          {steps.map((step, i) => (
+            <li key={step.label} className="flex items-center gap-2 sm:gap-2.5">
+              {i > 0 && <span className="h-px w-3 bg-stone-300 sm:w-6" aria-hidden />}
+              <button
+                type="button"
+                onClick={step.onOpen}
+                disabled={!step.onOpen}
+                aria-current={step.state === "current" ? "step" : undefined}
+                aria-label={`${step.label}${step.state === "current" ? " (current step)" : step.state === "done" ? " (done)" : ""}`}
+                className="flex min-h-11 items-center gap-2 px-1 enabled:cursor-pointer enabled:hover:[&>span:last-child]:underline"
+              >
+                <span
+                  className={cn(
+                    "flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[13px]",
+                    step.state === "done"
+                      ? "bg-[#eef0e9]"
+                      : step.state === "current"
+                        ? "bg-stone-950 text-white"
+                        : "border border-stone-300 text-stone-500",
+                  )}
+                >
+                  {step.state === "done" ? <DoneMark className="size-3.5 stroke-[#3a4536]" /> : i + 1}
+                </span>
+                <span
+                  className={cn(
+                    "text-[14px] underline-offset-[3px]",
+                    step.state === "current" ? "hidden font-medium text-stone-950 md:inline" : "hidden xl:inline",
+                    step.state === "done" ? "text-stone-700" : step.state === "todo" && "text-stone-500",
+                  )}
+                >
+                  {step.label}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <span className="hidden justify-self-end font-mono text-[12px] tracking-[0.1em] text-stone-600 uppercase sm:block">
+        {counter}
+      </span>
+    </header>
+  )
+}
+
 export function Display({ className, ...props }: ComponentProps<"h1">) {
   return (
     <h1

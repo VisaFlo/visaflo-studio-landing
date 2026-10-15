@@ -1,11 +1,11 @@
 "use client"
 
 // Keeps the current take in IndexedDB while it records (one-second chunks),
-// so a reload, a closed tab or a crashed browser doesn't throw away a minute
-// of reading. One take per browser; it's cleared once the request is sent or
-// the person starts over.
+// so a reload, a closed tab or a crashed browser doesn't throw away the
+// reading, and the portrait photo taken before it. One of each per browser;
+// they're cleared once the request is sent or the person starts over.
 
-import type { RecordingChecks } from "@/lib/studio/checks"
+import type { Check, RecordingChecks } from "@/lib/studio/checks"
 
 const DB_NAME = "vf-studio"
 const TAKES = "takes"
@@ -27,8 +27,12 @@ export type StoredTake = {
   finished?: { seconds: number; checks: RecordingChecks; cutOff?: boolean }
 }
 
-// Nobody signs in on /start, so the one take kept is this browser's.
+// Nobody signs in on /start, so the one take kept is this browser's. The
+// photo shares the takes store under its own key (no schema change).
 const OWNER = "device"
+const PHOTO = "device-photo"
+
+export type StoredPhoto = { uid: typeof PHOTO; blob: Blob; width: number; height: number; faceSeen: Check }
 
 let opening: Promise<IDBDatabase> | null = null
 
@@ -107,4 +111,17 @@ export async function clearTake(): Promise<void> {
       tx.objectStore(TAKES).delete(OWNER)
     }),
   )
+}
+
+export function savePhoto(photo: Omit<StoredPhoto, "uid">): Promise<unknown> {
+  return quietly(run([TAKES], "readwrite", (tx) => tx.objectStore(TAKES).put({ ...photo, uid: PHOTO })))
+}
+
+export async function loadPhoto(): Promise<Omit<StoredPhoto, "uid"> | null> {
+  const photo = await quietly(run<StoredPhoto>([TAKES], "readonly", (tx) => tx.objectStore(TAKES).get(PHOTO)))
+  return photo?.blob ? photo : null
+}
+
+export function clearPhoto(): Promise<unknown> {
+  return quietly(run([TAKES], "readwrite", (tx) => tx.objectStore(TAKES).delete(PHOTO)))
 }

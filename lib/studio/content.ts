@@ -6,16 +6,10 @@ export function scriptLines(name: string, firm: string): string[] {
     intro,
     "Immigration rules in Canada change almost every week,",
     "and most people only hear about it when it's too late.",
-    "So here are three things I tell every client before they apply.",
-    "First, check that your passport stays valid for your whole stay.",
-    "Many permits are only issued up to the date your passport expires.",
-    "Second, keep a copy of every form and document you send.",
-    "If IRCC asks a question later, you will want to see exactly what you submitted.",
-    "Third, watch your email and your online account.",
-    "When IRCC asks for more documents, there is a deadline, and missing it can end your application.",
-    "None of this is complicated, but it is easy to miss when you are busy.",
-    "If you are not sure where your file stands, talk to a licensed professional before you act.",
-    "I post short updates like this every week, so follow along for the next one.",
+    "So every week, I'll share what changed, in plain language,",
+    "and what it means for you.",
+    "If you're not sure where your file stands, talk to a licensed professional before you act.",
+    "Follow along for the next update.",
   ]
 }
 
@@ -24,8 +18,8 @@ export function lineSeconds(line: string): number {
   return Math.max(2.5, line.split(/\s+/).length * 0.4)
 }
 
-export const TARGET_SECONDS = 90
-export const MAX_SECONDS = 180
+export const TARGET_SECONDS = 30
+export const MAX_SECONDS = 90
 
 export type Topic = { id: string; title: string; detail: string }
 

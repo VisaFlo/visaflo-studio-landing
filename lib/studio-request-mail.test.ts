@@ -16,6 +16,7 @@ const ENTRY: StudioRequestMail = {
   topicTitle: "Family",
   submissionId: "20261009T211755-393dbaa7",
   recordingPath: "studio/20261009T211755-393dbaa7/recording.mp4",
+  photoPath: "studio/20261009T211755-393dbaa7/photo.jpg",
   recordingSeconds: 61,
   recordingSource: "camera",
   checks: { faceSeen: true, voiceHeard: null },
@@ -31,7 +32,8 @@ describe("sendStudioRequestEmail", () => {
     await sendStudioRequestEmail(ENTRY)
     expect(sent().text).toContain("1:01 (camera), face seen, voice not checked")
     expect(sent().replyTo).toEqual({ email: "dan@firm.ca", name: "Dan Jeong" })
-    expect(sent().text).toContain("gs://devdashboard-c9159-ca/studio/20261009T211755-393dbaa7/recording.mp4")
+    expect(sent().text).toContain("Video: gs://devdashboard-c9159-ca/studio/20261009T211755-393dbaa7/recording.mp4")
+    expect(sent().text).toContain("Photo: gs://devdashboard-c9159-ca/studio/20261009T211755-393dbaa7/photo.jpg")
     expect(sent().text).toContain("Open it in Studio admin: https://studio.visaflo.ca/admin/20261009T211755-393dbaa7")
   })
 
