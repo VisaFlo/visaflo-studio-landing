@@ -68,8 +68,11 @@ type UploadState = { status: "idle" } | { status: "uploading"; progress: number 
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
+// Added to the notice of a take restored without its photo; dropped once the photo is taken.
+const PHOTO_LOST = " Your photo wasn't kept, so take it again first."
+
 const CUT_OFF_NOTICE: ReviewNotice = {
-  text: "Recording stopped early. We kept what was recorded up to that point. Watch it, then submit it or record again.",
+  text: "Recording stopped early. We kept what was recorded up to that point. Watch it, then use it or record again.",
   partial: true,
 }
 
@@ -172,11 +175,11 @@ export function CaptureFlow() {
           })
           setReached(2)
           const notice: ReviewNotice = !stored.finished
-            ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.", partial: true }
+            ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then use it or record again.", partial: true }
             : stored.finished.cutOff
               ? CUT_OFF_NOTICE
-              : { text: "We kept your last recording. Watch it, then submit it or record again.", partial: false }
-          setReviewNotice(savedPhoto ? notice : { ...notice, text: `${notice.text} Your photo wasn't kept, so take it again first.` })
+              : { text: "We kept your last recording. Watch it, then use it or record again.", partial: false }
+          setReviewNotice(savedPhoto ? notice : { ...notice, text: notice.text + PHOTO_LOST })
           setStep("review")
           return
         }
@@ -342,6 +345,7 @@ export function CaptureFlow() {
       })
       // The take stays, and goes through its review again with the new photo.
       setReached((r) => reachedAfterNewPhoto(r, Boolean(recording)))
+      forgetLastSend()
       setStep("photo-review")
     } catch (error) {
       console.error("Taking the portrait photo failed", error)
@@ -350,11 +354,21 @@ export function CaptureFlow() {
     }
   }
 
+  // A new photo or take hasn't been sent: what the last Make my sample said
+  // (an upload or request failure) is about the one before.
+  function forgetLastSend() {
+    setUploadState({ status: "idle" })
+    setSendError(null)
+  }
+
   function keepPhoto() {
     if (!photo) return
     void savePhoto({ blob: photo.blob, width: photo.width, height: photo.height, faceSeen: photo.faceSeen })
     track("studio_photo_taken", { faceSeen: photo.faceSeen })
     setTipsOnly(false)
+    // A take restored without its photo has it now.
+    setReviewError(null)
+    setReviewNotice((n) => (n ? { ...n, text: n.text.replace(PHOTO_LOST, "") } : n))
     // Changing the photo of a take already recorded goes back to that take,
     // with the camera off (the video step reopens it).
     if (recording) {
@@ -468,6 +482,7 @@ export function CaptureFlow() {
     setReviewError(null)
     setReviewNotice(result.cutOff ? CUT_OFF_NOTICE : null)
     setReached(reachedAfterNewTake)
+    forgetLastSend()
     setStep("review")
   }, [abandonCamera, stopCamera])
 
@@ -506,7 +521,8 @@ export function CaptureFlow() {
     }
     // Every failure is logged, even of a submission since replaced; the
     // screen follows only the current one. A refusal wins over the other
-    // reasons, since its Retry has to start a new folder.
+    // reasons, since pressing Make my sample again after a refusal has to
+    // start a new folder.
     void settlePlan(plan).then(({ complete, failures }) => {
       for (const failure of failures) console.error(`Upload of the ${failure.name} failed`, failure.error)
       if (uploadPlan.current !== plan) return
@@ -559,31 +575,28 @@ export function CaptureFlow() {
     if (!topicTitle || !recording || !photo || !consent || sending) return
     setSendError(null)
     setSending(true)
-    const consentAt = new Date().toISOString()
-    const plan = startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
-    const { complete } = await settlePlan(plan)
-    if (!complete || uploadPlan.current !== plan) {
-      // The Submit screen says what went wrong (uploadState).
-      setSending(false)
-      return
-    }
-    const request = {
-      submissionId: plan.submissionId,
-      recordingPath: recordingPath(plan.submissionId, recording),
-      photoPath: photoPath(plan.submissionId),
-      recordingSeconds: recording.seconds,
-      recordingSource: recording.source,
-      checks: recording.checks,
-      email: profile.email,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      firm: profile.firm,
-      topicId: topicId ?? "",
-      topicTitle,
-      consent: CONSENT_TEXT,
-      consentAt,
-    }
     try {
+      const consentAt = new Date().toISOString()
+      const plan = startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
+      const { complete } = await settlePlan(plan)
+      // The Submit screen says what went wrong (uploadState).
+      if (!complete || uploadPlan.current !== plan) return
+      const request = {
+        submissionId: plan.submissionId,
+        recordingPath: recordingPath(plan.submissionId, recording),
+        photoPath: photoPath(plan.submissionId),
+        recordingSeconds: recording.seconds,
+        recordingSource: recording.source,
+        checks: recording.checks,
+        email: profile.email,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        firm: profile.firm,
+        topicId: topicId ?? "",
+        topicTitle,
+        consent: CONSENT_TEXT,
+        consentAt,
+      }
       await submitSampleRequest(request)
       const record = { topicTitle: request.topicTitle, at: new Date().toISOString() }
       rememberSent(record)
@@ -593,9 +606,9 @@ export function CaptureFlow() {
       track("studio_sample_requested", { topic: request.topicId, source: request.recordingSource })
       setStep("done")
     } catch (error) {
-      // Only the API's own message is written for the person; SDK and fetch
-      // errors get words of ours.
-      console.error("Request failed", error)
+      // Only the API's own message is written for the person; SDK, fetch and
+      // anything else get words of ours.
+      console.error("Make my sample failed", error)
       setSendError(error instanceof ApiError ? error.message : describeSubmitError(error))
     } finally {
       setSending(false)
@@ -644,8 +657,9 @@ export function CaptureFlow() {
   // Where a header step takes you: back to what you made there (the photo,
   // the take), not to its tips again.
   function openStep(i: number) {
-    // Off the camera screens, the camera goes off.
-    if (i === 0 || i >= 3) stopCamera()
+    // Off the camera screens (a review is one), the camera goes off; Retake
+    // and Record again reopen it.
+    if (i === 0 || i >= 3 || (i === 1 && photo) || (i === 2 && recording)) stopCamera()
     setTipsOnly(false)
     if (i === 0) setStep("about")
     else if (i === 1) setStep(photo ? "photo-review" : "photo-guide")
@@ -699,6 +713,7 @@ export function CaptureFlow() {
           initial={profile}
           onContinue={(next) => {
             saveProfile(next)
+            setSendError(null)
             setProfile(next)
             identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
             setTipsOnly(false)
@@ -816,8 +831,14 @@ export function CaptureFlow() {
         <TopicStep
           topicId={topicId}
           ownTopic={ownTopic}
-          onTopic={setTopicId}
-          onOwnTopic={setOwnTopic}
+          onTopic={(id) => {
+            setTopicId(id)
+            setSendError(null)
+          }}
+          onOwnTopic={(value) => {
+            setOwnTopic(value)
+            setSendError(null)
+          }}
           canContinue={Boolean(topicTitle)}
           onContinue={() => setStep("submit")}
         />

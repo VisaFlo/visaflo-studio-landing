@@ -26,7 +26,7 @@ export function ShotFrame({ children }: { children: ReactNode }) {
 }
 
 // The camera screens' layout: the frame, the two buttons right under it, then
-// one line (a link, the consent box) or the same height left empty.
+// one line (a link, or an error) or the same height left empty.
 export function ShotLayout({ frame, buttons, below }: { frame: ReactNode; buttons: ReactNode; below?: ReactNode }) {
   return (
     <main className="flex flex-grow flex-col items-center justify-center gap-4 p-4">

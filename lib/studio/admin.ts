@@ -13,7 +13,9 @@ export type Submission = {
   /**
    * "requested": request.json was read and names a topic (the browser then
    * asks /api/studio/requests to email the team).
-   * "recorded": only the recording is there, no request.json yet.
+   * "recorded": the recording is there but no request.json: the request
+   * failed after the upload, or an older submission made before a topic was
+   * picked (uploads used to start at the video review).
    * "request-unreadable": request.json exists but couldn't be read or has no
    * topic; `problems` has the detail.
    */

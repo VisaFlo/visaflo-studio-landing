@@ -769,10 +769,10 @@ export function ReviewStep({
             <p className="absolute inset-x-4 bottom-16 m-0 bg-stone-950/72 p-2 text-center text-[13px] text-white">
               {overlay === "unplayable"
                 ? notice?.partial
-                  ? "This recording can't be played back, probably because it was cut off. You can still submit it, but we may not be able to use it; recording again is safer."
+                  ? "This recording can't be played back, probably because it was cut off. You can still use it, but we may not be able to; recording again is safer."
                   : "This recording looks damaged and may not play for us either. We recommend recording again."
                 : overlay === "stalled"
-                  ? "This recording isn't playing. You can still submit it; recording again is safer."
+                  ? "This recording isn't playing. You can still use it; recording again is safer."
                   : "Playback didn't start. Try again."}
             </p>
           )}

@@ -42,7 +42,7 @@ async function readSubmission(bucket: StudioBucket, submissionId: string, items:
     problems: [],
   }
   const recording = recordingObject(items)
-  const photo = items.find((name) => name.endsWith(`/${PHOTO_FILE}`))
+  const photo = items.find((name) => name === `${folder}/${PHOTO_FILE}`)
   const request = items.find((name) => name.endsWith("/request.json"))
 
   // A refused read is about the server's credentials, not this file: let the
