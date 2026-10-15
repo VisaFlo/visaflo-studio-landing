@@ -22,12 +22,14 @@ email, first and last name and firm name, which stay in that browser
   on a full-screen countdown, with the script at the top and a face oval to
   stay in; there is no head-turn step. If MediaPipe can't load, the flow
   continues without live checks.
-- **Files**: the browser uploads `photo.jpg` and `recording.{mp4,webm}` straight to
+- **Files**: when the person presses **Make my sample** (on the last screen,
+  with the consent box; nothing goes up before), the browser uploads
+  `photo.jpg` and `recording.{mp4,webm}` straight to
   `gs://devdashboard-c9159-ca/studio/{submissionId}/` (the id is the UTC time
   plus 8 hex characters, `SUBMISSION_ID` in `lib/studio/project.ts`). The
   storage rules let a signed-out browser create those two files and nothing
   else: no overwrite, no `request.json`, no reading, listing or deleting.
-  A retry re-sends only the file that failed; after a refusal (the file may
+  Pressing it again after a failure re-sends only the file that failed; after a refusal (the file may
   be there already, its reply lost) it starts a new folder
   (`lib/studio/upload-plan.ts`).
 - **Notification**: `POST /api/studio/requests` checks the recording (and the

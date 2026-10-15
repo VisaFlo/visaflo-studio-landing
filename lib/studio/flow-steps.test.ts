@@ -37,7 +37,7 @@ describe("reached", () => {
     expect(reachedOnVisit(4, 5)).toBe(4)
   })
 
-  it("drops back to the video step after a new photo or take, so the old upload can't be sent", () => {
+  it("drops back to the video step after a new photo or take, until the take is reviewed again", () => {
     expect(reachedAfterNewPhoto(4, true)).toBe(2)
     expect(reachedAfterNewPhoto(4, false)).toBe(1)
     expect(reachedAfterNewPhoto(1, true)).toBe(1)

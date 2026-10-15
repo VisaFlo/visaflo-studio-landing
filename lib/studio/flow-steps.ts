@@ -53,9 +53,8 @@ export function stepIndex(step: Step, cameraFor: CameraFor): number {
 
 // `reached` is the furthest step reached; the header opens any step up to
 // it. Visiting a screen raises it (never past Submit). A new photo or a new
-// take lowers it to the video step, so Pick a topic and Submit can't be
-// opened until the take is submitted again: the request must not go out with
-// the upload of the photo or take that was replaced.
+// take lowers it to the video step, so Pick a topic and Submit open again
+// only once the take has been through its review (Use this video).
 export function reachedOnVisit(reached: number, at: number): number {
   return Math.max(reached, Math.min(4, at))
 }

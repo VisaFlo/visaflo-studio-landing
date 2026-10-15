@@ -13,7 +13,7 @@ import {
   StatusPill,
 } from "@/components/studio/camera-frame"
 import { FlowTitle, MonoLabel, PrimaryButton, QuietButton } from "@/components/studio/ui"
-import { CONSENT_TEXT, lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
+import { lineSeconds, MAX_SECONDS, TARGET_SECONDS } from "@/lib/studio/content"
 import type { Check } from "@/lib/studio/checks"
 import { checkAlignment, type AlignCheck, type FaceFrame } from "@/lib/studio/face-tracker"
 import type { Photo } from "@/lib/studio/photo"
@@ -648,29 +648,26 @@ const STALL_MS = 5000
 // and local; the persisted per-take verdict is `checks.playable`.
 type PlaybackProblem = "refused" | "stalled" | null
 
-// The take just recorded, in the same frame as the camera was: play it, agree,
-// submit or record again.
+// The take just recorded, in the same frame as the camera was: play it, then
+// use it or record again. Nothing is uploaded until Make my sample.
 export function ReviewStep({
   recording,
-  consent,
   error,
   notice,
-  onConsent,
   onPlayable,
-  onSubmit,
+  onUse,
   onRedo,
 }: {
   recording: Recording
-  consent: boolean
   error?: string | null
   notice?: ReviewNotice | null
-  onConsent: (value: boolean) => void
   /**
    * Whether this browser could play the take back (true once playback really
    * runs, false on a load or decode error); the flow keeps it with the checks.
    */
   onPlayable: (playable: boolean) => void
-  onSubmit: () => void
+  /** Keep this take and go on to the topic (nothing is uploaded yet). */
+  onUse: () => void
   onRedo: () => void
 }) {
   const player = useRef<HTMLVideoElement>(null)
@@ -802,28 +799,17 @@ export function ReviewStep({
           <ShotButton type="button" onClick={onRedo}>
             Record again
           </ShotButton>
-          <ShotButton type="button" primary disabled={!consent} onClick={onSubmit}>
-            Submit recording
+          <ShotButton type="button" primary onClick={onUse}>
+            Use this video
           </ShotButton>
         </>
       }
       below={
-        <div className="flex flex-col items-center gap-1">
-          <label className="flex cursor-pointer items-center gap-2.5 text-[14px] leading-[1.4] text-stone-700">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => onConsent(e.target.checked)}
-              className="m-0 size-[18px] shrink-0 accent-stone-950"
-            />
-            <span>{CONSENT_TEXT}</span>
-          </label>
-          {error && (
-            <p role="alert" className="m-0 text-[14px] leading-[1.5] text-[#c2410c]">
-              {error}
-            </p>
-          )}
-        </div>
+        error && (
+          <p role="alert" className="m-0 text-[14px] leading-[1.5] text-[#c2410c]">
+            {error}
+          </p>
+        )
       }
     />
   )

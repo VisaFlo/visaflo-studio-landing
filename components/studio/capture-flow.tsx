@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react"
 import Link from "next/link"
-import { Camera, Newspaper, Send, TriangleAlert, Video } from "lucide-react"
+import { Camera, Newspaper, Send, Video } from "lucide-react"
 
 import {
   AlignStep,
@@ -59,11 +59,11 @@ import {
   uploadRecording,
   type SentRequest,
 } from "@/lib/studio/upload"
-import { cancelPlan, filesToStart, isFor, planFor, settlePlan, startFile, type UploadPlan } from "@/lib/studio/upload-plan"
+import { cancelPlan, filesToStart, planFor, settlePlan, startFile, type UploadPlan } from "@/lib/studio/upload-plan"
 import { cn } from "@/lib/utils"
 
-// The recording upload, for the banner. A failure keeps how far it got and
-// says why (see uploadFailureReason).
+// The upload, for the Make my sample button and the Submit screen. A failure
+// keeps how far it got and says why (see uploadFailureReason).
 type UploadState = { status: "idle" } | { status: "uploading"; progress: number } | { status: "done" } | ({ status: "failed"; progress: number } & UploadFailure)
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
@@ -117,7 +117,6 @@ export function CaptureFlow() {
 
   const [recording, setRecording] = useState<Recording | null>(null)
   const [consent, setConsent] = useState(false)
-  const [consentAt, setConsentAt] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
   // Why the take on review needs a word (recovered, or cut off), and whether
   // it is only part of what was recorded, which changes what an unplayable
@@ -341,7 +340,7 @@ export function CaptureFlow() {
         if (previous) URL.revokeObjectURL(previous.url)
         return next
       })
-      // The take stays, but has to be submitted again with the new photo.
+      // The take stays, and goes through its review again with the new photo.
       setReached((r) => reachedAfterNewPhoto(r, Boolean(recording)))
       setStep("photo-review")
     } catch (error) {
@@ -473,10 +472,10 @@ export function CaptureFlow() {
   }, [abandonCamera, stopCamera])
 
   // The photo and the recording go up together into the submission's folder;
-  // the banner shows the recording's progress, the photo being a fraction of
-  // its size, and fails only once both have settled. `refused`: the Retry
-  // after a refusal, which starts a new folder (see upload-plan.ts).
-  function startUpload(rec: Recording, still: Photo, { refused = false } = {}) {
+  // the progress shown is the recording's, the photo being a fraction of its
+  // size, and it fails only once both have settled. `refused`: a try after a
+  // refusal, which starts a new folder (see upload-plan.ts).
+  function startUpload(rec: Recording, still: Photo, { refused = false } = {}): UploadPlan<Recording, Photo> {
     const previous = uploadPlan.current
     const plan = planFor(previous, rec, still, { refused, newId: newSubmissionId })
     if (plan !== previous) cancelPlan(previous)
@@ -499,14 +498,14 @@ export function CaptureFlow() {
         )
       }
     } catch (error) {
-      // The SDK refused before any request (no storage, a bad ref): the banner
-      // says so rather than sitting on "uploading".
+      // The SDK refused before any request (no storage, a bad ref): the Submit
+      // screen says so rather than sitting on "uploading".
       console.error("Upload didn't start", error)
       startError = error
       setUploadState({ status: "failed", progress: 0, ...uploadFailureReason(error) })
     }
     // Every failure is logged, even of a submission since replaced; the
-    // banner follows only the current one. A refusal wins over the other
+    // screen follows only the current one. A refusal wins over the other
     // reasons, since its Retry has to start a new folder.
     void settlePlan(plan).then(({ complete, failures }) => {
       for (const failure of failures) console.error(`Upload of the ${failure.name} failed`, failure.error)
@@ -524,14 +523,12 @@ export function CaptureFlow() {
       const reason = reasons.find((r) => r.reason === "refused") ?? reasons[0]
       setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...reason }))
     })
+    return plan
   }
 
-  function retryUpload() {
-    if (!recording || !photo) return
-    startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
-  }
-
-  function submitRecording() {
+  // Use this video: the take is checked here, then on to the topic. Nothing
+  // is uploaded until Make my sample.
+  function useRecording() {
     if (!recording) return
     if (!photo) {
       // A take recovered without its photo: the photo comes first.
@@ -546,10 +543,6 @@ export function CaptureFlow() {
       setReviewError("This recording is over 500 MB. Record again and keep it to about 30 seconds.")
       return
     }
-    setConsentAt(new Date().toISOString())
-    // The same take and photo keep their submission, unless it was refused;
-    // a new take or photo starts another.
-    startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
     track("studio_recording_submitted", { source: recording.source, seconds: recording.seconds })
     setStep("topic")
   }
@@ -557,18 +550,21 @@ export function CaptureFlow() {
   const topicTitle =
     topicId === OWN_TOPIC_ID ? ownTopic.trim() : (TOPICS.find((t) => t.id === topicId)?.title ?? "")
 
-  // "Make my sample" can be pressed while the upload is still running; the
-  // request goes out the moment both files are in. Everything it sends is
-  // read here, once, from the submission being uploaded, and the Submit
-  // screen is locked meanwhile (nothing to edit, no way back).
+  // Make my sample: the photo and the video go up, then the request goes out.
+  // Pressed again after a failure, it re-sends only what didn't make it (a
+  // refusal starts a new folder; see upload-plan.ts), and after a request that
+  // failed with both files up, it only sends the request again. The Submit
+  // screen is locked meanwhile, so what it sends is what's on it.
   async function makeSample() {
-    const plan = uploadPlan.current
-    if (!topicTitle || !recording || !photo || !plan || sending) return
-    // The header can't reach Submit with a take or photo other than the one
-    // uploading (flow-steps.ts); if it ever does, nothing goes out.
-    if (!isFor(plan, recording, photo)) {
-      console.error("Make my sample with a take or photo that isn't the one uploading")
-      setSendError("Submit your recording again first.")
+    if (!topicTitle || !recording || !photo || !consent || sending) return
+    setSendError(null)
+    setSending(true)
+    const consentAt = new Date().toISOString()
+    const plan = startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
+    const { complete } = await settlePlan(plan)
+    if (!complete || uploadPlan.current !== plan) {
+      // The Submit screen says what went wrong (uploadState).
+      setSending(false)
       return
     }
     const request = {
@@ -585,15 +581,7 @@ export function CaptureFlow() {
       topicId: topicId ?? "",
       topicTitle,
       consent: CONSENT_TEXT,
-      consentAt: consentAt ?? new Date().toISOString(),
-    }
-    setSendError(null)
-    setSending(true)
-    const { complete } = await settlePlan(plan)
-    if (!complete || uploadPlan.current !== plan) {
-      // The upload banner says what went wrong and offers Retry.
-      setSending(false)
-      return
+      consentAt,
     }
     try {
       await submitSampleRequest(request)
@@ -808,8 +796,6 @@ export function CaptureFlow() {
       {step === "review" && recording && (
         <ReviewStep
           recording={recording}
-          consent={consent}
-          onConsent={setConsent}
           error={reviewError}
           notice={reviewNotice}
           onPlayable={(playable) =>
@@ -821,13 +807,9 @@ export function CaptureFlow() {
               return checks === r.checks ? r : { ...r, checks }
             })
           }
-          onSubmit={submitRecording}
+          onUse={useRecording}
           onRedo={() => toCamera("align")}
         />
-      )}
-
-      {(step === "topic" || step === "submit") && (
-        <UploadBanner state={uploadState} onRetry={retryUpload} />
       )}
 
       {step === "topic" && (
@@ -847,10 +829,11 @@ export function CaptureFlow() {
           recording={recording}
           profile={profile}
           topicTitle={topicTitle}
-          canSubmit={Boolean(topicTitle) && uploadState.status !== "failed"}
+          consent={consent}
+          onConsent={setConsent}
           sending={sending}
-          waitingForUpload={sending && uploadState.status === "uploading"}
-          error={sendError}
+          upload={uploadState}
+          error={sendError ?? (uploadState.status === "failed" ? uploadFailureText(uploadState) : null)}
           onSubmit={() => void makeSample()}
           onRetakePhoto={() => openStep(1)}
           onRecordAgain={() => toCamera("align")}
@@ -957,57 +940,11 @@ function WhatsNext() {
   )
 }
 
-function UploadBanner({ state, onRetry }: { state: UploadState; onRetry: () => void }) {
-  if (state.status === "idle" || state.status === "done") return null
-  const percent = Math.round(state.progress * 100)
-  return (
-    <div
-      role={state.status === "failed" ? "alert" : "status"}
-      className="shrink-0 border-b border-stone-200 bg-stone-50"
-    >
-      <div className="mx-auto flex w-full max-w-[816px] items-center gap-3 px-(--page-pad) py-3 text-[14px] sm:gap-4">
-        {state.status === "failed" ? (
-          <>
-            <TriangleAlert className="size-5 shrink-0 text-[#c2410c]" strokeWidth={1.8} aria-hidden />
-            {state.reason === "refused" ? (
-              <span className="flex-grow">
-                <span className="font-medium">We couldn&apos;t save your photo and video.</span>{" "}
-                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
-              </span>
-            ) : state.reason === "other" ? (
-              <span className="flex-grow">
-                <span className="font-medium">We couldn&apos;t save your photo and video ({state.code}).</span>{" "}
-                <span className="text-stone-600">Retry. Still stuck? Email info@vflo.app.</span>
-              </span>
-            ) : (
-              <span className="flex-grow">
-                <span className="font-medium">The upload stopped.</span>{" "}
-                <span className="text-stone-600">Check your connection, then press Retry. Keep this page open.</span>
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onRetry}
-              className="flex h-11 items-center border border-stone-950 px-4 font-medium hover:bg-white"
-            >
-              Retry
-            </button>
-          </>
-        ) : (
-          <>
-            <span className="whitespace-nowrap text-stone-700">Uploading your photo and video</span>
-            <span className="relative h-1 flex-grow overflow-hidden bg-stone-200">
-              <span
-                className="absolute inset-y-0 left-0 bg-stone-950 transition-[width]"
-                style={{ width: `${percent}%` }}
-              />
-            </span>
-            <span className="font-mono text-stone-700">{percent}%</span>
-          </>
-        )}
-      </div>
-    </div>
-  )
+// What a failed upload says on the Submit screen; Make my sample tries again.
+function uploadFailureText(state: UploadFailure): string {
+  if (state.reason === "network") return "The upload stopped. Check your connection, then press Make my sample again. Keep this page open."
+  const code = state.reason === "other" ? ` (${state.code})` : ""
+  return `We couldn't upload your photo and video${code}. Press Make my sample to try again. Still stuck? Email info@vflo.app.`
 }
 
 function TopicStep({
@@ -1078,9 +1015,10 @@ function SubmitStep({
   recording,
   profile,
   topicTitle,
-  canSubmit,
+  consent,
+  onConsent,
   sending,
-  waitingForUpload,
+  upload,
   error,
   onSubmit,
   onRetakePhoto,
@@ -1092,9 +1030,10 @@ function SubmitStep({
   recording: Recording
   profile: StudioProfile
   topicTitle: string
-  canSubmit: boolean
+  consent: boolean
+  onConsent: (value: boolean) => void
   sending: boolean
-  waitingForUpload: boolean
+  upload: UploadState
   error: string | null
   onSubmit: () => void
   onRetakePhoto: () => void
@@ -1111,7 +1050,7 @@ function SubmitStep({
       <div className="flex flex-col gap-2.5">
         <Display className="sm:text-[48px]">Ready to make your sample?</Display>
         <p className="m-0 text-[16px] leading-[1.5] text-stone-600">
-          Check everything once. We&apos;ll make it and email you, usually within a day.
+          Check everything once. We&apos;ll make it and email you.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1163,9 +1102,23 @@ function SubmitStep({
           </div>
         </dl>
       </div>
+      <label className="flex cursor-pointer items-start gap-3 text-[15px] leading-[1.45] text-stone-700">
+        <input
+          type="checkbox"
+          checked={consent}
+          disabled={sending}
+          onChange={(e) => onConsent(e.target.checked)}
+          className="m-0 mt-0.5 size-[18px] shrink-0 accent-stone-950"
+        />
+        <span>{CONSENT_TEXT}</span>
+      </label>
       {error && <ErrorText>{error}</ErrorText>}
-      <PrimaryButton type="button" disabled={!canSubmit || sending} onClick={onSubmit} className="self-start px-10">
-        {waitingForUpload ? "Finishing upload…" : sending ? "Sending…" : "Make my sample"}
+      <PrimaryButton type="button" disabled={!topicTitle || !consent || sending} onClick={onSubmit} className="self-start px-10">
+        {sending && upload.status === "uploading"
+          ? `Uploading… ${Math.round(upload.progress * 100)}%`
+          : sending
+            ? "Sending…"
+            : "Make my sample"}
       </PrimaryButton>
     </main>
   )
@@ -1214,7 +1167,7 @@ function DoneStep({ email, topicTitle, onAnother }: { email: string; topicTitle:
             </span>
             <span className="flex flex-col gap-0.5">
               <span className="text-[16px] font-medium">Your sample</span>
-              <span className="text-[14px] text-stone-600">In progress · usually within a day</span>
+              <span className="text-[14px] text-stone-600">In progress</span>
             </span>
           </li>
         </ol>
