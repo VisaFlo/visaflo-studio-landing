@@ -1,6 +1,7 @@
 import type { User } from "firebase/auth"
 
 import { ApiError, apiError } from "@/lib/studio/errors"
+import type { SubmissionFile } from "@/lib/studio/project"
 
 // Fetches a submission's original recording, or its photo, through /api/admin/recording,
 // which needs the admin's token in a header, so it can't be a plain link.
@@ -10,7 +11,7 @@ import { ApiError, apiError } from "@/lib/studio/errors"
 export async function fetchRecording(
   user: Pick<User, "getIdToken">,
   id: string,
-  file: "recording" | "photo" = "recording",
+  file: SubmissionFile = "recording",
 ): Promise<{ blob: Blob; filename: string }> {
   const token = await user.getIdToken()
   const query = `id=${encodeURIComponent(id)}${file === "photo" ? "&file=photo" : ""}`

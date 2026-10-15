@@ -1,7 +1,7 @@
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
 import { studioAdmin, type StudioAdmin } from "@/lib/studio/admin-firebase"
 import { isPlainObject, parseChecks } from "@/lib/studio/checks"
-import { RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
+import { PHOTO_FILE, RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
 import { asEmail, fullName, identifier, isoDate, LIMITS, seconds, text } from "@/lib/studio/request-json"
 import { StorageError } from "@/lib/studio/storage"
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   // A page from before the portrait photo sends none; one that does names
   // this submission's photo.jpg and nothing else.
   const sentPhoto = body.photoPath === undefined ? undefined : (identifier(body.photoPath, LIMITS.recordingPath) ?? "")
-  if (sentPhoto !== undefined && sentPhoto !== `${folder}photo.jpg`) {
+  if (sentPhoto !== undefined && sentPhoto !== `${folder}${PHOTO_FILE}`) {
     console.error("Rejected a studio request's photo path", { submissionId, photoPath: body.photoPath })
     return Response.json({ error: "That isn't a photo we know." }, { status: 400 })
   }

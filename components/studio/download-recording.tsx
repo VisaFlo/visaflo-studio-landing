@@ -6,6 +6,7 @@ import type { User } from "firebase/auth"
 import { ErrorText, PrimaryButton, SecondaryButton } from "@/components/studio/ui"
 import { fetchRecording } from "@/lib/studio/admin-download"
 import { ApiError, describeLoadError } from "@/lib/studio/errors"
+import type { SubmissionFile } from "@/lib/studio/project"
 
 // Saves a submission's original recording, or its photo (see
 // lib/studio/admin-download.ts).
@@ -18,7 +19,7 @@ export function DownloadRecording({
 }: {
   user: User
   id: string
-  file?: "recording" | "photo"
+  file?: SubmissionFile
   kind?: "primary" | "secondary"
   className?: string
 }) {

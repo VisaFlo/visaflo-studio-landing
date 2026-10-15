@@ -37,6 +37,11 @@ describe("sendStudioRequestEmail", () => {
     expect(sent().text).toContain("Open it in Studio admin: https://studio.visaflo.ca/admin/20261009T211755-393dbaa7")
   })
 
+  it("says when a request came without a photo (a page from before the photo step)", async () => {
+    await sendStudioRequestEmail({ ...ENTRY, photoPath: undefined })
+    expect(sent().text).toContain("Photo: — (sent from a page without the photo step)")
+  })
+
   it("escapes what the person typed before it goes into the HTML", async () => {
     await sendStudioRequestEmail({ ...ENTRY, name: '<b>Dan</b> "x"' })
     expect(sent().html).toContain("&lt;b&gt;Dan&lt;/b&gt;")

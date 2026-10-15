@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { sendStudioRequestEmail } from "@/lib/studio-request-mail"
 import { studioAdmin } from "@/lib/studio/admin-firebase"
+import { newSubmissionId, photoPath, recordingPath } from "@/lib/studio/paths"
 import { fakeBucket, type Bucket } from "@/lib/studio/test-bucket"
 
 import { POST } from "./route"
@@ -94,7 +95,19 @@ describe("POST /api/studio/requests", () => {
     expect((await post({ ...BODY, photoPath: "studio/20261009T211755-aaaaaaaa/photo.jpg" })).status).toBe(400)
     expect((await post({ ...BODY, photoPath: `studio/${SID}/photo.png` })).status).toBe(400)
     expect((await post({ ...BODY, photoPath: 42 })).status).toBe(400)
+    // null is a client bug, not a page without the photo step (that one sends no photoPath at all).
+    expect((await post({ ...BODY, photoPath: null })).status).toBe(400)
     expect(mail).not.toHaveBeenCalled()
+  })
+
+  it("accepts the paths the browser builds, for every recording type it can make", async () => {
+    const sends = ["video/mp4;codecs=avc1,mp4a", "video/webm;codecs=vp9,opus", "video/quicktime", "video/x-m4v"].map((mime) => {
+      const id = newSubmissionId()
+      return { submissionId: id, recordingPath: recordingPath(id, { mime }), photoPath: photoPath(id) }
+    })
+    expect(sends.map((send) => send.recordingPath.split(".").pop())).toEqual(["mp4", "webm", "mov", "m4v"])
+    useBucket({ meta: Object.fromEntries(sends.flatMap((send) => [send.recordingPath, send.photoPath]).map((name) => [name, { name }])) })
+    for (const send of sends) expect((await post({ ...BODY, ...send })).status, send.recordingPath).toBe(200)
   })
 
   it("refuses a request whose photo isn't in the bucket", async () => {

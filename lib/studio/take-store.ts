@@ -2,8 +2,10 @@
 
 // Keeps the current take in IndexedDB while it records (one-second chunks),
 // so a reload, a closed tab or a crashed browser doesn't throw away the
-// reading, and the portrait photo taken before it. One of each per browser;
-// they're cleared once the request is sent or the person starts over.
+// reading, and the portrait photo once it's kept. One of each per browser. A
+// new take or Start over replaces the take; both go once the request is sent
+// or the person begins a new sample. Storage failures (private mode, quota)
+// are only logged: the flow carries on, and a reload finds less.
 
 import type { Check, RecordingChecks } from "@/lib/studio/checks"
 

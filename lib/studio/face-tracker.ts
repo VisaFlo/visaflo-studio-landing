@@ -120,9 +120,9 @@ export type AlignCheck = { inFrame: boolean; distance: "ok" | "closer" | "back";
 
 // Where the face should sit in the vertical frame: centred, a little above
 // the middle (like a phone selfie), filling roughly a third to three fifths
-// of the width, with enough light on it. The dashed oval the person sees
-// (camera-frame.tsx) shares its centre with the check; its radii are a
-// visual target tuned to match the size range, not derived from it.
+// of the width, with enough light on it. The framing screens show no oval;
+// the one on the full-screen recording (camera-frame.tsx) is a generous
+// target to stay in, not this check.
 export const GUIDE = {
   cx: 0.5,
   cy: 0.4,
@@ -131,9 +131,6 @@ export const GUIDE = {
   maxSize: 0.62,
   /** Mean face brightness, 0 to 255. */
   minLight: 70,
-  /** Oval radii in the preview's 90×160 viewBox. */
-  ovalRx: 21,
-  ovalRy: 27,
 } as const
 
 export function checkAlignment(frame: FaceFrame): AlignCheck | null {

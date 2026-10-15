@@ -5,30 +5,13 @@ import { ref, uploadBytes, uploadBytesResumable, type UploadTask } from "firebas
 import { apiError } from "@/lib/studio/errors"
 import { studioStorage } from "@/lib/studio/firebase"
 import { PHOTO_MIME } from "@/lib/studio/photo"
-import { extensionFor, type Recording } from "@/lib/studio/recorder"
+import { photoPath, recordingPath } from "@/lib/studio/paths"
+import type { Recording } from "@/lib/studio/recorder"
 
-// Everything for one sample lives under studio/{submissionId}/ in the
-// VisaFlo bucket. Nobody signs in on /start: the storage rules let a browser
-// create the portrait photo and the recording there and nothing else (no
-// overwrite, no reading); the server writes request.json next to them
-// (app/api/studio/requests).
-export function submissionFolder(submissionId: string): string {
-  return `studio/${submissionId}`
-}
+export { newSubmissionId, photoPath, recordingPath } from "@/lib/studio/paths"
 
-// The UTC time to the second, then 8 hex characters: SUBMISSION_ID in
-// lib/studio/project.ts, which the rules and the server check.
-export function newSubmissionId(): string {
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)
-  return `${stamp}-${crypto.randomUUID().slice(0, 8)}`
-}
-
-export function photoPath(submissionId: string): string {
-  return `${submissionFolder(submissionId)}/photo.jpg`
-}
-
-// The photo is small, so one request; the rules refuse a second upload to
-// the same submission, so the flow sends it once per submission.
+// The photo is small, so one request. The rules refuse a second upload of
+// either file to the same submission (see upload-plan.ts).
 export async function uploadPhoto(email: string, submissionId: string, photo: Blob): Promise<void> {
   await uploadBytes(ref(studioStorage(), photoPath(submissionId)), photo, { contentType: PHOTO_MIME, customMetadata: { email } })
 }
@@ -37,10 +20,6 @@ export type UploadHandle = {
   path: string
   done: Promise<void>
   cancel: () => void
-}
-
-export function recordingPath(submissionId: string, recording: Pick<Recording, "mime">): string {
-  return `${submissionFolder(submissionId)}/recording.${extensionFor(recording.mime)}`
 }
 
 export function uploadRecording(
@@ -86,8 +65,8 @@ export type SampleRequest = {
   consentAt: string
 }
 
-// The server checks the recording is in the bucket, keeps the request as
-// request.json next to it and emails the team.
+// The server checks the recording (and the photo, when sent) are in the
+// bucket, keeps the request as request.json next to them and emails the team.
 export async function submitSampleRequest(request: SampleRequest): Promise<void> {
   const response = await fetch("/api/studio/requests", {
     method: "POST",

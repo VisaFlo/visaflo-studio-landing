@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/studio/admin-auth"
 import { storageFailure } from "@/lib/studio/admin-errors"
 import { readRequestJson, type RequestJson } from "@/lib/studio/request-json"
+import { PHOTO_FILE, SUBMISSION_FILES } from "@/lib/studio/project"
 import { StorageError } from "@/lib/studio/storage"
 import { downloadName, parseSubmissionId, recordingObject, submissionFolder } from "@/lib/studio/submissions"
 
@@ -15,18 +16,19 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const who = parseSubmissionId(params.get("id"))
   if (!who) return Response.json({ error: "Unknown submission." }, { status: 400 })
-  const file = params.get("file") ?? "recording"
-  if (file !== "recording" && file !== "photo") return Response.json({ error: "Unknown file." }, { status: 400 })
+  const file = SUBMISSION_FILES.find((name) => name === (params.get("file") ?? "recording"))
+  if (!file) return Response.json({ error: "Unknown file." }, { status: 400 })
   const folder = submissionFolder(who)
 
   try {
     const { items } = await admin.bucket.list(`${folder}/`)
-    const object = file === "photo" ? items.find((name) => name === `${folder}/photo.jpg`) : recordingObject(items)
+    const object = file === "photo" ? items.find((name) => name === `${folder}/${PHOTO_FILE}`) : recordingObject(items)
     if (!object) return Response.json({ error: `No ${file} in that folder.` }, { status: 404 })
 
     // The name only decides the file name, so a missing or broken
-    // request.json falls back to "recording"; a refused read still fails the
-    // whole download (it would fail the bytes too).
+    // request.json falls back to the file's own name ("recording", "photo");
+    // a refused read still fails the whole download (it would fail the bytes
+    // too).
     const details = await admin.bucket
       .json(`${folder}/request.json`)
       .then(readRequestJson)

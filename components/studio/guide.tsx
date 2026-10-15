@@ -52,7 +52,7 @@ export const VIDEO_GUIDE: Guide = {
     {
       icon: Focus,
       title: "Stay centered in frame",
-      text: "Keep your face in the oval. Don't sway or lean out of the frame.",
+      text: "Keep your face inside the oval while you record. Don't sway or lean out of the frame.",
     },
     {
       icon: VolumeX,

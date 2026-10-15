@@ -39,6 +39,16 @@ import { asEmail, fullName } from "@/lib/studio/request-json"
 import { pickRecordingMime, startRecording, type ActiveRecorder, type Recording, type StoppedTake } from "@/lib/studio/recorder"
 import { beginTake, clearPhoto, clearTake, finishTake, loadPhoto, loadTake, saveChunk, savePhoto } from "@/lib/studio/take-store"
 import {
+  headerStep,
+  reachedAfterNewPhoto,
+  reachedAfterNewTake,
+  reachedOnVisit,
+  stepIndex,
+  STEPS,
+  type CameraFor,
+  type Step,
+} from "@/lib/studio/flow-steps"
+import {
   lastSent,
   newSubmissionId,
   photoPath,
@@ -48,59 +58,9 @@ import {
   uploadPhoto,
   uploadRecording,
   type SentRequest,
-  type UploadHandle,
 } from "@/lib/studio/upload"
+import { cancelPlan, filesToStart, isFor, planFor, settlePlan, startFile, type UploadPlan } from "@/lib/studio/upload-plan"
 import { cn } from "@/lib/utils"
-
-type Step =
-  | "loading"
-  | "about"
-  | "camera"
-  | "blocked"
-  | "photo-guide"
-  | "photo"
-  | "photo-review"
-  | "video-guide"
-  | "align"
-  | "countdown"
-  | "script"
-  | "review"
-  | "topic"
-  | "submit"
-  | "done"
-
-/** The camera screen the camera is being opened for. */
-type CameraFor = "photo" | "align"
-
-// The five steps in the header, and which one each screen belongs to (5: done).
-const STEPS = ["Tell us about you", "Take a photo", "Take a video", "Pick a topic", "Submit"]
-
-function stepIndex(step: Step, cameraFor: CameraFor): number {
-  switch (step) {
-    case "loading":
-    case "about":
-      return 0
-    case "camera":
-    case "blocked":
-      return cameraFor === "photo" ? 1 : 2
-    case "photo-guide":
-    case "photo":
-    case "photo-review":
-      return 1
-    case "video-guide":
-    case "align":
-    case "countdown":
-    case "script":
-    case "review":
-      return 2
-    case "topic":
-      return 3
-    case "submit":
-      return 4
-    case "done":
-      return 5
-  }
-}
 
 // The recording upload, for the banner. A failure keeps how far it got and
 // says why (see uploadFailureReason).
@@ -116,15 +76,14 @@ const CUT_OFF_NOTICE: ReviewNotice = {
 export function CaptureFlow() {
   const [step, setStep] = useState<Step>("loading")
   const [cameraFor, setCameraFor] = useState<CameraFor>("photo")
-  // The furthest step reached: the header opens any step up to it. A new
-  // photo or take lowers it, so the request can't go out with the upload of
-  // the one before (submitting again starts a new upload).
+  // The furthest step reached: the header opens any step up to it (see
+  // lib/studio/flow-steps.ts).
   const [reached, setReached] = useState(0)
   const [reachedFor, setReachedFor] = useState<Step>(step)
   const at = stepIndex(step, cameraFor)
   if (reachedFor !== step) {
     setReachedFor(step)
-    setReached((r) => Math.max(r, Math.min(4, at)))
+    setReached((r) => reachedOnVisit(r, at))
   }
   const [profile, setProfile] = useState<StudioProfile>(EMPTY_PROFILE)
   const [sent, setSent] = useState<SentRequest | null>(null)
@@ -167,18 +126,16 @@ export function CaptureFlow() {
 
   // The portrait photo, kept (with the take) until the request is sent.
   const [photo, setPhoto] = useState<Photo | null>(null)
-  // Remounts the photo framing after a failed capture, so its countdown runs again.
+  // Remounts the photo framing after a failed capture, so its face check starts fresh.
   const [photoAttempt, setPhotoAttempt] = useState(0)
   const [photoError, setPhotoError] = useState<string | null>(null)
-  // A guide opened from its camera screen ("Remind me…") goes back to that screen.
+  // A guide opened from its camera screen ("Remind me…", "Video tips"): its
+  // back arrow returns to that screen.
   const [tipsOnly, setTipsOnly] = useState(false)
 
-  const submissionId = useRef<string | null>(null)
-  // What is already in the submission's folder: the rules refuse a second
-  // upload of either file, so a retry sends only what didn't make it.
-  const photoSentTo = useRef<string | null>(null)
-  const recordingSentTo = useRef<string | null>(null)
-  const upload = useRef<UploadHandle | null>(null)
+  // The submission being uploaded: its folder, and the take and photo it is
+  // for (see lib/studio/upload-plan.ts).
+  const uploadPlan = useRef<UploadPlan<Recording, Photo> | null>(null)
   const [uploadState, setUploadState] = useState<UploadState>({ status: "idle" })
   const [topicId, setTopicId] = useState<string | null>(null)
   const [ownTopic, setOwnTopic] = useState("")
@@ -200,9 +157,9 @@ export function CaptureFlow() {
         setSent(previous)
         if (complete) identify(next.email.toLowerCase(), { name: fullName(next.firstName, next.lastName), firm: next.firm })
         // A take left from a reload or a closed tab: pick up at review rather
-        // than making them record again. Only with its photo: a submission
-        // needs both.
-        if (!previous && saved && savedPhoto && complete) {
+        // than making them record again. One kept without its photo (the
+        // browser wouldn't store it) says so; the photo is taken again first.
+        if (!previous && saved && complete) {
           const { take: stored, blob, chunks } = saved
           setRecording({
             blob,
@@ -215,13 +172,12 @@ export function CaptureFlow() {
             checks: stored.finished?.checks ?? RECOVERED_CHECKS,
           })
           setReached(2)
-          setReviewNotice(
-            !stored.finished
-              ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.", partial: true }
-              : stored.finished.cutOff
-                ? CUT_OFF_NOTICE
-                : { text: "We kept your last recording. Watch it, then submit it or record again.", partial: false },
-          )
+          const notice: ReviewNotice = !stored.finished
+            ? { text: "The page closed while you were recording. We kept what you recorded up to that point. Watch it, then submit it or record again.", partial: true }
+            : stored.finished.cutOff
+              ? CUT_OFF_NOTICE
+              : { text: "We kept your last recording. Watch it, then submit it or record again.", partial: false }
+          setReviewNotice(savedPhoto ? notice : { ...notice, text: `${notice.text} Your photo wasn't kept, so take it again first.` })
           setStep("review")
           return
         }
@@ -374,8 +330,8 @@ export function CaptureFlow() {
     })
   }
 
-  // The photo's countdown ended (or the person pressed the button): take the
-  // still from the preview they framed themselves in.
+  // Take photo pressed: take the still from the preview they framed
+  // themselves in.
   async function takePhoto(result: { faceSeen: Check; preview: HTMLVideoElement | null }) {
     setPhotoError(null)
     try {
@@ -386,7 +342,7 @@ export function CaptureFlow() {
         return next
       })
       // The take stays, but has to be submitted again with the new photo.
-      setReached((r) => Math.min(r, recording ? 2 : 1))
+      setReached((r) => reachedAfterNewPhoto(r, Boolean(recording)))
       setStep("photo-review")
     } catch (error) {
       console.error("Taking the portrait photo failed", error)
@@ -400,8 +356,14 @@ export function CaptureFlow() {
     void savePhoto({ blob: photo.blob, width: photo.width, height: photo.height, faceSeen: photo.faceSeen })
     track("studio_photo_taken", { faceSeen: photo.faceSeen })
     setTipsOnly(false)
-    // Changing the photo of a take already recorded goes back to that take.
-    setStep(recording ? "review" : "video-guide")
+    // Changing the photo of a take already recorded goes back to that take,
+    // with the camera off (the video step reopens it).
+    if (recording) {
+      stopCamera()
+      setStep("review")
+      return
+    }
+    setStep("video-guide")
   }
 
   // Start recording pressed: what the framing check saw is kept, and the
@@ -506,49 +468,74 @@ export function CaptureFlow() {
     })
     setReviewError(null)
     setReviewNotice(result.cutOff ? CUT_OFF_NOTICE : null)
-    setReached((r) => Math.min(r, 2))
+    setReached(reachedAfterNewTake)
     setStep("review")
   }, [abandonCamera, stopCamera])
 
-  // The photo (once per submission) and the recording go up together; the
-  // banner follows the recording, the photo being a fraction of its size.
-  function startUpload(rec: Recording, still: Photo) {
-    upload.current?.cancel()
-    const id = (submissionId.current ??= newSubmissionId())
-    setUploadState({ status: "uploading", progress: 0 })
-    const recordingUpload: UploadHandle =
-      recordingSentTo.current === id
-        ? { path: recordingPath(id, rec), done: Promise.resolve(), cancel: () => {} }
-        : uploadRecording(profile.email, id, rec, (progress) =>
-            setUploadState((s) => (s.status === "uploading" ? { status: "uploading", progress } : s)),
-          )
-    void recordingUpload.done
-      .then(() => {
-        recordingSentTo.current = id
-      })
-      .catch(() => {})
-    const photoUpload =
-      photoSentTo.current === id
-        ? Promise.resolve()
-        : uploadPhoto(profile.email, id, still.blob).then(() => {
-            photoSentTo.current = id
-          })
-    const handle: UploadHandle = { ...recordingUpload, done: Promise.all([photoUpload, recordingUpload.done]).then(() => undefined) }
-    upload.current = handle
-    handle.done
-      .then(() => setUploadState({ status: "done" }))
-      .catch((error: unknown) => {
-        if ((error as { code?: string })?.code === "storage/canceled") return
-        console.error("Upload failed", error)
-        setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...uploadFailureReason(error) }))
-      })
+  // The photo and the recording go up together into the submission's folder;
+  // the banner shows the recording's progress, the photo being a fraction of
+  // its size, and fails only once both have settled. `refused`: the Retry
+  // after a refusal, which starts a new folder (see upload-plan.ts).
+  function startUpload(rec: Recording, still: Photo, { refused = false } = {}) {
+    const previous = uploadPlan.current
+    const plan = planFor(previous, rec, still, { refused, newId: newSubmissionId })
+    if (plan !== previous) cancelPlan(previous)
+    uploadPlan.current = plan
+    const starting = filesToStart(plan)
+    const recordingDone = plan.files.recording?.status === "done"
+    setUploadState((s) => ({
+      status: "uploading",
+      progress: recordingDone ? 1 : starting.includes("recording") ? 0 : s.status === "uploading" ? s.progress : 0,
+    }))
+    let startError: unknown = null
+    try {
+      for (const name of starting) {
+        startFile(plan, name, () =>
+          name === "photo"
+            ? { done: uploadPhoto(profile.email, plan.submissionId, still.blob), cancel: () => {} }
+            : uploadRecording(profile.email, plan.submissionId, rec, (progress) => {
+                if (uploadPlan.current === plan) setUploadState((s) => (s.status === "uploading" ? { status: "uploading", progress } : s))
+              }),
+        )
+      }
+    } catch (error) {
+      // The SDK refused before any request (no storage, a bad ref): the banner
+      // says so rather than sitting on "uploading".
+      console.error("Upload didn't start", error)
+      startError = error
+      setUploadState({ status: "failed", progress: 0, ...uploadFailureReason(error) })
+    }
+    // Every failure is logged, even of a submission since replaced; the
+    // banner follows only the current one. A refusal wins over the other
+    // reasons, since its Retry has to start a new folder.
+    void settlePlan(plan).then(({ complete, failures }) => {
+      for (const failure of failures) console.error(`Upload of the ${failure.name} failed`, failure.error)
+      if (uploadPlan.current !== plan) return
+      if (complete) {
+        setUploadState({ status: "done" })
+        return
+      }
+      const reasons = failures.map((failure) => uploadFailureReason(failure.error))
+      if (startError !== null) reasons.push(uploadFailureReason(startError))
+      if (!reasons.length) {
+        console.error("The upload ended without every file and without a failure", Object.keys(plan.files))
+        reasons.push({ reason: "other", code: "incomplete" })
+      }
+      const reason = reasons.find((r) => r.reason === "refused") ?? reasons[0]
+      setUploadState((s) => ({ status: "failed", progress: s.status === "uploading" ? s.progress : 0, ...reason }))
+    })
+  }
+
+  function retryUpload() {
+    if (!recording || !photo) return
+    startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
   }
 
   function submitRecording() {
     if (!recording) return
     if (!photo) {
-      // Only a take recovered without its photo gets here; the photo comes first.
-      setReviewError("Take your portrait photo first.")
+      // A take recovered without its photo: the photo comes first.
+      setReviewError("Take your portrait photo first: open Take a photo above.")
       return
     }
     if (recording.blob.size === 0) {
@@ -560,9 +547,9 @@ export function CaptureFlow() {
       return
     }
     setConsentAt(new Date().toISOString())
-    // A new recording is a new submission.
-    submissionId.current = null
-    startUpload(recording, photo)
+    // The same take and photo keep their submission, unless it was refused;
+    // a new take or photo starts another.
+    startUpload(recording, photo, { refused: uploadState.status === "failed" && uploadState.reason === "refused" })
     track("studio_recording_submitted", { source: recording.source, seconds: recording.seconds })
     setStep("topic")
   }
@@ -571,15 +558,23 @@ export function CaptureFlow() {
     topicId === OWN_TOPIC_ID ? ownTopic.trim() : (TOPICS.find((t) => t.id === topicId)?.title ?? "")
 
   // "Make my sample" can be pressed while the upload is still running; the
-  // request goes out the moment the file is in. Everything it sends is read
-  // here, once, so changing the topic mid-wait can't send a second request.
+  // request goes out the moment both files are in. Everything it sends is
+  // read here, once, from the submission being uploaded, and the Submit
+  // screen is locked meanwhile (nothing to edit, no way back).
   async function makeSample() {
-    if (!topicTitle || !recording || !upload.current || sending) return
-    const handle = upload.current
+    const plan = uploadPlan.current
+    if (!topicTitle || !recording || !photo || !plan || sending) return
+    // The header can't reach Submit with a take or photo other than the one
+    // uploading (flow-steps.ts); if it ever does, nothing goes out.
+    if (!isFor(plan, recording, photo)) {
+      console.error("Make my sample with a take or photo that isn't the one uploading")
+      setSendError("Submit your recording again first.")
+      return
+    }
     const request = {
-      submissionId: submissionId.current ?? "",
-      recordingPath: handle.path,
-      photoPath: photoPath(submissionId.current ?? ""),
+      submissionId: plan.submissionId,
+      recordingPath: recordingPath(plan.submissionId, recording),
+      photoPath: photoPath(plan.submissionId),
       recordingSeconds: recording.seconds,
       recordingSource: recording.source,
       checks: recording.checks,
@@ -594,10 +589,9 @@ export function CaptureFlow() {
     }
     setSendError(null)
     setSending(true)
-    try {
-      await handle.done
-    } catch {
-      // The upload banner already says what went wrong and offers Retry.
+    const { complete } = await settlePlan(plan)
+    if (!complete || uploadPlan.current !== plan) {
+      // The upload banner says what went wrong and offers Retry.
       setSending(false)
       return
     }
@@ -621,7 +615,8 @@ export function CaptureFlow() {
   }
 
   function startAnother() {
-    upload.current?.cancel()
+    cancelPlan(uploadPlan.current)
+    uploadPlan.current = null
     void clearTake()
     void clearPhoto()
     setRecording((previous) => {
@@ -636,8 +631,6 @@ export function CaptureFlow() {
     setTopicId(null)
     setOwnTopic("")
     setUploadState({ status: "idle" })
-    upload.current = null
-    submissionId.current = null
     setReached(0)
     setStep("photo-guide")
   }
@@ -648,6 +641,7 @@ export function CaptureFlow() {
   // To a camera screen: straight there with the camera on, reopening it if it
   // was allowed before, or through the camera permission step.
   function toCamera(target: CameraFor) {
+    setCameraFor(target)
     if (stream) {
       setStep(target)
       return
@@ -656,7 +650,6 @@ export function CaptureFlow() {
       void openCamera(target)
       return
     }
-    setCameraFor(target)
     setStep("camera")
   }
 
@@ -688,16 +681,15 @@ export function CaptureFlow() {
 
   // Steps can't be opened mid-recording, while the request goes out, or once it's sent.
   const busy = step === "countdown" || step === "script" || sending || at === 5
-  const headerSteps: HeaderStep[] = STEPS.map((label, i) => ({
-    label,
-    state: i === at ? "current" : i < at || i <= reached ? "done" : "todo",
-    onOpen: !busy && i !== at && i <= reached ? () => openStep(i) : undefined,
-  }))
+  const headerSteps: HeaderStep[] = STEPS.map((label, i) => {
+    const { state, open } = headerStep(i, at, reached, busy)
+    return { label, state, onOpen: open ? () => openStep(i) : undefined }
+  })
   const header = (
     <StepsHeader
       steps={headerSteps}
       counter={at < 5 ? `Step ${at + 1} of 5` : "Done"}
-      onBack={step === "loading" ? undefined : back[step]}
+      onBack={step === "loading" || sending ? undefined : back[step]}
     />
   )
 
@@ -835,7 +827,7 @@ export function CaptureFlow() {
       )}
 
       {(step === "topic" || step === "submit") && (
-        <UploadBanner state={uploadState} onRetry={() => recording && photo && startUpload(recording, photo)} />
+        <UploadBanner state={uploadState} onRetry={retryUpload} />
       )}
 
       {step === "topic" && (
@@ -989,8 +981,8 @@ function UploadBanner({ state, onRetry }: { state: UploadState; onRetry: () => v
               </span>
             ) : (
               <span className="flex-grow">
-                <span className="font-medium">Upload stopped at {percent}%.</span>{" "}
-                <span className="text-stone-600">Check your connection. Your photo and video are saved.</span>
+                <span className="font-medium">The upload stopped.</span>{" "}
+                <span className="text-stone-600">Check your connection, then press Retry. Keep this page open.</span>
               </span>
             )}
             <button
@@ -1110,7 +1102,10 @@ function SubmitStep({
   onChangeTopic: () => void
   onEditDetails: () => void
 }) {
-  const edit = "flex h-8 items-center text-[14px] text-stone-600 underline underline-offset-[3px] hover:text-stone-950"
+  // Nothing can change while the request goes out: it was read when Make my
+  // sample was pressed.
+  const edit =
+    "flex h-8 items-center text-[14px] text-stone-600 underline underline-offset-[3px] enabled:hover:text-stone-950 disabled:cursor-not-allowed disabled:text-stone-400 disabled:no-underline"
   return (
     <main className="mx-auto flex w-full max-w-[880px] flex-grow flex-col gap-7 px-(--page-pad) pt-10 pb-16 sm:pt-12">
       <div className="flex flex-col gap-2.5">
@@ -1127,7 +1122,7 @@ function SubmitStep({
           </div>
           <div className="flex items-center justify-between gap-2 px-3.5 py-3">
             <span className="text-[15px] font-medium">Photo</span>
-            <button type="button" onClick={onRetakePhoto} className={edit}>
+            <button type="button" onClick={onRetakePhoto} disabled={sending} className={edit}>
               Retake
             </button>
           </div>
@@ -1138,7 +1133,7 @@ function SubmitStep({
           </div>
           <div className="flex items-center justify-between gap-2 px-3.5 py-3">
             <span className="text-[15px] font-medium">Video</span>
-            <button type="button" onClick={onRecordAgain} className={edit}>
+            <button type="button" onClick={onRecordAgain} disabled={sending} className={edit}>
               Record again
             </button>
           </div>
@@ -1159,10 +1154,10 @@ function SubmitStep({
             <dd className="m-0 text-[16px] break-all">{profile.email}</dd>
           </div>
           <div className="mt-auto flex gap-5">
-            <button type="button" onClick={onChangeTopic} className={edit}>
+            <button type="button" onClick={onChangeTopic} disabled={sending} className={edit}>
               Change topic
             </button>
-            <button type="button" onClick={onEditDetails} className={edit}>
+            <button type="button" onClick={onEditDetails} disabled={sending} className={edit}>
               Edit details
             </button>
           </div>

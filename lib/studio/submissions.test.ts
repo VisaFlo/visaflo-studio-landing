@@ -203,6 +203,12 @@ describe("loadSubmission", () => {
   it("lets a refused read (the service account's credentials or IAM) reach the route instead of hiding it per file", async () => {
     const refused = fakeBucket({ listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`] } }, meta: { [`studio/${SID}/recording.mp4`]: 403 } })
     await expect(loadSubmission(refused, SID)).rejects.toBeInstanceOf(StorageError)
+    const photo = `studio/${SID}/photo.jpg`
+    const refusedPhoto = fakeBucket({
+      listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`, photo] } },
+      meta: { [`studio/${SID}/recording.mp4`]: META, [photo]: 403 },
+    })
+    await expect(loadSubmission(refusedPhoto, SID)).rejects.toBeInstanceOf(StorageError)
     const bucket = fakeBucket({ listings: { [`studio/${SID}/`]: { items: [`studio/${SID}/recording.mp4`] } }, meta: { [`studio/${SID}/recording.mp4`]: 401 } })
     await expect(loadSubmission(bucket, SID)).rejects.toMatchObject({ status: 401 })
   })

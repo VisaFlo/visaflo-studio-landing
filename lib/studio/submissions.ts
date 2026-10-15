@@ -1,6 +1,7 @@
 import type { Submission, SubmissionProblem } from "@/lib/studio/admin"
 import { isPlainObject } from "@/lib/studio/checks"
-import { RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
+import { submissionFolder } from "@/lib/studio/paths"
+import { PHOTO_FILE, RECORDING_EXTENSIONS, SUBMISSION_ID } from "@/lib/studio/project"
 import { asEmail, readRequestJson, seconds, type RequestJson } from "@/lib/studio/request-json"
 import { consoleUrl, firstDownloadToken, mediaUrl, StorageError, type StudioBucket } from "@/lib/studio/storage"
 
@@ -11,9 +12,7 @@ export function parseSubmissionId(id: unknown): string | null {
   return typeof id === "string" && SUBMISSION_ID.test(id) ? id : null
 }
 
-export function submissionFolder(submissionId: string): string {
-  return `studio/${submissionId}`
-}
+export { submissionFolder } from "@/lib/studio/paths"
 
 const RECORDING = new RegExp(`/recording\\.(${RECORDING_EXTENSIONS.join("|")})$`)
 
@@ -43,7 +42,7 @@ async function readSubmission(bucket: StudioBucket, submissionId: string, items:
     problems: [],
   }
   const recording = recordingObject(items)
-  const photo = items.find((name) => name.endsWith("/photo.jpg"))
+  const photo = items.find((name) => name.endsWith(`/${PHOTO_FILE}`))
   const request = items.find((name) => name.endsWith("/request.json"))
 
   // A refused read is about the server's credentials, not this file: let the

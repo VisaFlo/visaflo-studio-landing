@@ -23,8 +23,9 @@ import { useFaceFrames } from "@/lib/studio/use-face-frames"
 import { advancePointer, indexScript, lineOfWord, tokenize } from "@/lib/studio/word-follow"
 import { cn } from "@/lib/utils"
 
-// Camera steps: the preview takes the big left area on desktop and sits
-// between the title and the controls on a phone.
+// The camera permission screens (Allow, Blocked): a placeholder frame takes
+// the big left area on desktop and sits between the title and the controls
+// on a phone.
 function StageLayout({ title, stage, children }: { title: ReactNode; stage: ReactNode; children: ReactNode }) {
   return (
     <main className="mx-auto grid w-full max-w-[1280px] flex-grow content-center gap-6 px-(--page-pad) py-6 sm:py-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:gap-x-12 lg:gap-y-6 lg:py-12">

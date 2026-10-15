@@ -76,9 +76,11 @@ export function describeSubmitError(error: unknown): string {
 }
 
 /**
- * Why the recording upload failed, for the banner: only a retry-limit failure
- * is called a connection problem. "refused" is the storage rules saying no
- * (an over-size file, or rules not matching this page's build).
+ * Why the photo or recording upload failed, for the banner: only a
+ * retry-limit failure is called a connection problem. "refused" is the
+ * storage rules saying no: an over-size file, rules not matching this page's
+ * build, or the file already there (an upload whose reply was lost), which
+ * is why a Retry after a refusal starts a new folder (upload-plan.ts).
  */
 export type UploadFailure = { reason: "network" } | { reason: "refused" } | { reason: "other"; code: string }
 
